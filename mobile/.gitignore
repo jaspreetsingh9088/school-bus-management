@@ -1,0 +1,14 @@
+.dart_tool/
+.packages
+build/
+.flutter-plugins
+.flutter-plugins-dependencies
+pubspec.lock
+# Platform folders are generated in CI by `flutter create` (see .github/workflows/android.yml)
+android/
+ios/
+web/
+linux/
+macos/
+windows/
+test/widget_test.dart

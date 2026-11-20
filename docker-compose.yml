@@ -1,0 +1,24 @@
+# Local development: database + API.  Run:  docker compose up --build
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: schoolbus
+      POSTGRES_PASSWORD: schoolbus
+      POSTGRES_DB: schoolbus
+    ports: ["5432:5432"]
+    volumes: [db-data:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U schoolbus"]
+      interval: 3s
+      retries: 20
+  api:
+    build: ./backend
+    depends_on:
+      db: { condition: service_healthy }
+    environment:
+      DATABASE_URL: postgresql://schoolbus:schoolbus@db:5432/schoolbus
+      JWT_SECRET: local-dev-secret-change-me-0123456789abcdef
+    ports: ["3000:3000"]
+volumes:
+  db-data:

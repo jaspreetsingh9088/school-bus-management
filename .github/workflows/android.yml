@@ -1,0 +1,63 @@
+# Builds the Android app and publishes it as a GitHub Release.
+# Stable download link: https://github.com/<owner>/<repo>/releases/latest/download/school-bus.apk
+name: Android app
+
+on:
+  push:
+    branches: [main]
+    paths: ['mobile/**', '.github/workflows/android.yml']
+  pull_request:
+    paths: ['mobile/**', '.github/workflows/android.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  # Set a repository variable API_URL to point the app at another server.
+  API_URL: ${{ vars.API_URL || 'https://school-bus-management-api.vercel.app' }}
+
+jobs:
+  apk:
+    name: Build APK
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: '3.27.4'
+          cache: true
+      - name: Generate the Android project
+        run: |
+          flutter create --platforms=android --org in.schoolbus --project-name school_bus .
+          python3 tool/patch_android.py
+      - run: flutter pub get
+      - run: flutter analyze --no-fatal-infos --no-fatal-warnings
+      - name: Build release APK
+        run: |
+          flutter build apk --release --dart-define=API_URL=$API_URL
+          mkdir -p ../dist && cp build/app/outputs/flutter-apk/app-release.apk ../dist/school-bus.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: school-bus-apk
+          path: dist/school-bus.apk
+      - name: Publish release
+        if: github.event_name != 'pull_request'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: app-v1.0.${{ github.run_number }}
+          name: School Bus app 1.0.${{ github.run_number }}
+          make_latest: 'true'
+          files: dist/school-bus.apk
+          body: |
+            Android app for parents, drivers and attendants.
+            Connected to: ${{ env.API_URL }}
+            Install: download school-bus.apk on the phone and allow "install unknown apps" when asked.

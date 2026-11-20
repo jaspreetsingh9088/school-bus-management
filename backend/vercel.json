@@ -1,0 +1,10 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "buildCommand": "npm run vercel-build",
+  "outputDirectory": "public",
+  "functions": {
+    "api/index.js": { "includeFiles": "{dist,drizzle}/**", "maxDuration": 30 }
+  },
+  "rewrites": [{ "source": "/api/v1/(.*)", "destination": "/api" }],
+  "crons": [{ "path": "/api/v1/cron/daily", "schedule": "30 18 * * *" }]
+}

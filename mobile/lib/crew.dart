@@ -169,7 +169,7 @@ class _TripScreenState extends State<TripScreen> {
       accuracy: LocationAccuracy.high,
       distanceFilter: 5,
       intervalDuration: const Duration(seconds: 5),
-      foregroundNotificationConfig: ForegroundNotificationConfig(
+      foregroundNotificationConfig: const ForegroundNotificationConfig(
         notificationTitle: 'School Bus trip running',
         notificationText: 'Sharing the bus location with parents',
         enableWakeLock: true,

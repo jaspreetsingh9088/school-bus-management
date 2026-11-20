@@ -1,72 +1,52 @@
 'use client';
 import Link from 'next/link';
-import { FormEvent, useState } from 'react';
-import { clean, ErrorNote, Shell, useForm } from '@/components/ui';
-import { api, useApi } from '@/lib/api';
+import { CrudPage } from '@/components/Crud';
+import { Shell } from '@/components/ui';
+import { useApi } from '@/lib/api';
 
 export default function Routes() {
   return <Shell><Body /></Shell>;
 }
 
 function Body() {
-  const routes = useApi('/admin/routes');
   const schools = useApi('/admin/schools');
   const buses = useApi('/admin/buses');
   const staff = useApi('/admin/staff');
-  const f = useForm({ name: '', schoolId: '', direction: 'MORNING', busId: '', driverId: '', attendantId: '' });
-  const [error, setError] = useState<string | null>(null);
-  const name = (list: any, id: string | null, key = 'name') => list?.find((x: any) => x.id === id)?.[key] ?? '—';
-  const drivers = (staff.data ?? []).filter((u: any) => u.role === 'DRIVER');
-  const attendants = (staff.data ?? []).filter((u: any) => u.role === 'ATTENDANT');
-
-  async function add(e: FormEvent) {
-    e.preventDefault();
-    setError(null);
-    try {
-      const r = await api('/admin/routes', { method: 'POST', body: clean(f.values) });
-      window.location.href = `/route-detail/?id=${r.id}`;
-    } catch (err) {
-      setError((err as Error).message);
-    }
-  }
+  const opt = (list: any[] | null, label: (x: any) => string, filter: (x: any) => boolean = () => true) =>
+    (list ?? []).filter(filter).map((x) => ({ value: x.id, label: label(x) }));
+  const name = (list: any[] | null, id: string | null, key = 'name') => (id && list?.find((x) => x.id === id)?.[key]) || '—';
 
   return (
-    <>
-      <h1>Routes</h1>
-      <p className="sub">Make a separate route for the morning pickup and the afternoon drop-off. Open a route to set its stops and children.</p>
-      <ErrorNote error={error ?? routes.error} />
-      <div className="panel">
-        <h2>New route</h2>
-        <form className="inline" onSubmit={add}>
-          <label>Name<input required placeholder="Route 3 — Morning" {...f.bind('name')} /></label>
-          <label>School
-            <select required {...f.bind('schoolId')}><option value="">Choose…</option>{(schools.data ?? []).map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}</select>
-          </label>
-          <label>Trip<select {...f.bind('direction')}><option value="MORNING">Morning pickup</option><option value="AFTERNOON">Afternoon drop-off</option></select></label>
-          <label>Bus<select {...f.bind('busId')}><option value="">—</option>{(buses.data ?? []).map((b: any) => <option key={b.id} value={b.id}>{b.registrationNumber}</option>)}</select></label>
-          <label>Driver<select {...f.bind('driverId')}><option value="">—</option>{drivers.map((u: any) => <option key={u.id} value={u.id}>{u.name}</option>)}</select></label>
-          <label>Attendant<select {...f.bind('attendantId')}><option value="">—</option>{attendants.map((u: any) => <option key={u.id} value={u.id}>{u.name}</option>)}</select></label>
-          <button className="primary">Create route</button>
-        </form>
-      </div>
-      <div className="panel">
-        <table>
-          <thead><tr><th>Route</th><th>Trip</th><th>School</th><th>Bus</th><th>Driver</th><th>Attendant</th><th /></tr></thead>
-          <tbody>
-            {(routes.data ?? []).map((r: any) => (
-              <tr key={r.id}>
-                <td><b>{r.name}</b></td>
-                <td>{r.direction === 'MORNING' ? 'Morning' : 'Afternoon'}</td>
-                <td>{name(schools.data, r.schoolId)}</td>
-                <td>{name(buses.data, r.busId, 'registrationNumber')}</td>
-                <td>{name(staff.data, r.driverId)}</td>
-                <td>{name(staff.data, r.attendantId)}</td>
-                <td><Link href={`/route-detail/?id=${r.id}`}>Stops & children</Link></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </>
+    <CrudPage
+      title="Routes"
+      subtitle="Make one route for the morning pickup and one for the afternoon drop-off. Click a route to set its stops and children."
+      noun="Route"
+      listPath="/admin/routes"
+      search={(r) => r.name}
+      fields={[
+        { key: 'name', label: 'Route name', required: true, placeholder: 'e.g. Route 3 — Morning' },
+        { key: 'direction', label: 'Trip', type: 'select', required: true, only: 'add', options: [{ value: 'MORNING', label: 'Morning pickup (home → school)' }, { value: 'AFTERNOON', label: 'Afternoon drop-off (school → home)' }] },
+        { key: 'schoolId', label: 'School', type: 'select', required: true, options: opt(schools.data, (s) => s.name) },
+        { key: 'busId', label: 'Bus', type: 'select', options: opt(buses.data, (b) => `${b.registrationNumber}${b.fleetNumber ? ` (${b.fleetNumber})` : ''}`) },
+        { key: 'driverId', label: 'Driver', type: 'select', options: opt(staff.data, (u) => u.name, (u) => u.role === 'DRIVER' && u.active) },
+        { key: 'attendantId', label: 'Attendant', type: 'select', options: opt(staff.data, (u) => u.name, (u) => u.role === 'ATTENDANT' && u.active) },
+      ]}
+      toForm={(r) => ({ name: r.name, direction: r.direction, schoolId: r.schoolId, busId: r.busId ?? '', driverId: r.driverId ?? '', attendantId: r.attendantId ?? '' })}
+      toBody={(v, isEdit) => {
+        const body: Record<string, any> = { ...v };
+        for (const k of ['busId', 'driverId', 'attendantId']) if (body[k] === '') delete body[k];
+        if (isEdit) delete body.direction;
+        return body;
+      }}
+      editPath={(r) => `/admin/routes/${r.id}`}
+      deletePath={(r) => `/admin/routes/${r.id}`}
+      columns={[
+        { label: 'Route', render: (r) => <><Link className="name" href={`/route-detail/?id=${r.id}`}>{r.name}</Link><div className="sub2">{r.direction === 'MORNING' ? 'Morning pickup' : 'Afternoon drop-off'} · {name(schools.data, r.schoolId)}</div></> },
+        { label: 'Bus', render: (r) => name(buses.data, r.busId, 'registrationNumber') },
+        { label: 'Driver', render: (r) => name(staff.data, r.driverId) },
+        { label: 'Attendant', render: (r) => name(staff.data, r.attendantId) },
+      ]}
+      extraActions={(r) => <Link className="link-btn" href={`/route-detail/?id=${r.id}`}>Stops & children</Link>}
+    />
   );
 }

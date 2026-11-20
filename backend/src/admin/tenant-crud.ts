@@ -1,5 +1,5 @@
 import { ConflictException, NotFoundException } from '@nestjs/common';
-import { and, desc, eq, SQL } from 'drizzle-orm';
+import { and, desc, eq, isNull, SQL } from 'drizzle-orm';
 import type { PgColumn, PgTable } from 'drizzle-orm/pg-core';
 import { Db } from '../db/db.module';
 
@@ -9,8 +9,10 @@ type TenantTable = PgTable & { id: PgColumn; companyId: PgColumn };
 export class TenantCrud<T extends TenantTable> {
   constructor(private readonly db: Db, private readonly table: T, private readonly label: string) {}
 
+  /** Live records only: archived ones (deletedAt set) are hidden. */
   list(companyId: string, extra?: SQL) {
-    const where = extra ? and(eq(this.table.companyId, companyId), extra) : eq(this.table.companyId, companyId);
+    const deletedAt = (this.table as unknown as { deletedAt?: PgColumn }).deletedAt;
+    const where = and(eq(this.table.companyId, companyId), extra, deletedAt ? isNull(deletedAt) : undefined);
     return this.db.select().from(this.table as PgTable).where(where).orderBy(desc(this.table.id)) as Promise<T['$inferSelect'][]>;
   }
 

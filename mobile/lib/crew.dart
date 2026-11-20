@@ -272,24 +272,87 @@ class _TripScreenState extends State<TripScreen> {
     await _mark(student, 'HANDED_OVER', adultId: choice['adultId'], parentId: choice['parentId']);
   }
 
-  List<Widget> _actions(Map student) {
+  /// One big button for the usual next step, and a menu for the rare ones.
+  Widget _studentActions(Map student) {
     final st = student['status'] as String;
-    Widget b(String label, VoidCallback onTap, {Color? color}) => Padding(
-          padding: const EdgeInsets.only(right: 6, top: 6),
-          child: FilledButton.tonal(
-            style: FilledButton.styleFrom(backgroundColor: color?.withValues(alpha: 0.15), foregroundColor: color, visualDensity: VisualDensity.compact),
-            onPressed: _busy || !_running ? null : onTap,
-            child: Text(label),
-          ),
-        );
-    final out = <Widget>[];
-    if (st == 'SCHEDULED' || st == 'NO_SHOW') out.add(b('Boarded', () => _mark(student, 'BOARDED'), color: Colors.blue));
-    if (st == 'SCHEDULED') out.add(b(_morning ? 'Not at stop' : 'Didn’t come', () => _mark(student, 'NO_SHOW'), color: Colors.orange));
-    if (!_morning && (st == 'BOARDED' || st == 'HELD')) out.add(b('Hand over', () => _handOver(student), color: Colors.green));
-    if (!_morning && st == 'BOARDED' && student['mayGoHomeAlone'] == true) out.add(b('Goes home alone', () => _mark(student, 'DROPPED_ALONE'), color: Colors.green));
-    if (!_morning && st == 'BOARDED') out.add(b('No adult — hold', () => _mark(student, 'HELD'), color: Colors.red));
-    if (!_morning && st == 'HELD') out.add(b('Return to school', () => _mark(student, 'RETURNED'), color: Colors.red));
-    return out;
+    final enabled = !_busy && _running;
+    String? mainLabel;
+    VoidCallback? main;
+    if (st == 'SCHEDULED' || st == 'NO_SHOW') {
+      mainLabel = 'Boarded';
+      main = () => _mark(student, 'BOARDED');
+    } else if (!_morning && (st == 'BOARDED' || st == 'HELD')) {
+      mainLabel = 'Hand over';
+      main = () => _handOver(student);
+    }
+    final more = <PopupMenuEntry<String>>[
+      if (st == 'SCHEDULED') PopupMenuItem(value: 'NO_SHOW', child: Text(_morning ? 'Not at the stop' : 'Didn’t come to the bus')),
+      if (!_morning && st == 'BOARDED' && student['mayGoHomeAlone'] == true) const PopupMenuItem(value: 'DROPPED_ALONE', child: Text('Goes home alone (allowed)')),
+      if (!_morning && st == 'BOARDED') const PopupMenuItem(value: 'HELD', child: Text('No adult here — keep on bus')),
+      if (!_morning && st == 'HELD') const PopupMenuItem(value: 'RETURNED', child: Text('Take back to school')),
+    ];
+    return Row(mainAxisSize: MainAxisSize.min, children: [
+      if (main != null)
+        FilledButton(
+          style: FilledButton.styleFrom(minimumSize: const Size(110, 44), backgroundColor: mainLabel == 'Boarded' ? const Color(0xFF1F6FEB) : const Color(0xFF1A7F37)),
+          onPressed: enabled ? main : null,
+          child: Text(mainLabel!, style: const TextStyle(fontSize: 15)),
+        )
+      else
+        StatusChip(st),
+      if (more.isNotEmpty)
+        PopupMenuButton<String>(
+          enabled: enabled,
+          icon: const Icon(Icons.more_vert),
+          itemBuilder: (_) => more,
+          onSelected: (to) => _mark(student, to),
+        ),
+    ]);
+  }
+
+  /// The single big button at the bottom, for the trip's next step.
+  Widget? _nextStep(Map<String, dynamic> trip) {
+    final status = trip['status'] as String;
+    String? label;
+    Color color = const Color(0xFF1F6FEB);
+    Future<void> Function()? run;
+    if (status == 'SCHEDULED') {
+      label = 'Start trip';
+      run = () => _act(() => Api.instance.post('$_base/start'));
+    } else if (status == 'IN_PROGRESS' && _morning && trip['arrivedSchoolAt'] == null) {
+      label = 'Reached school';
+      run = () async {
+        if (await _confirm('Reached school?', 'Everyone on the bus will be marked as reached school.')) {
+          await _act(() => Api.instance.post('$_base/arrive-school'));
+        }
+      };
+    } else if (status == 'IN_PROGRESS' && trip['emptyBusCheckedAt'] == null) {
+      label = 'Check bus is empty';
+      color = Colors.deepOrange;
+      run = () async {
+        if (await _confirm('Is the bus empty?', 'Walk to the back of the bus and check every seat.')) {
+          await _act(() => Api.instance.post('$_base/empty-bus-check'));
+        }
+      };
+    } else if (status == 'IN_PROGRESS') {
+      label = 'End trip';
+      color = const Color(0xFF1A7F37);
+      run = () => _act(() async {
+            await _flush();
+            await Api.instance.post('$_base/end');
+          });
+    }
+    if (label == null) return null;
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: FilledButton(
+          style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(56), backgroundColor: color),
+          onPressed: _busy ? null : run,
+          child: Text(label, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
+        ),
+      ),
+    );
   }
 
   Future<bool> _confirm(String title, String text) async =>
@@ -329,82 +392,38 @@ class _TripScreenState extends State<TripScreen> {
     final trip = _trip!;
     final stops = (sheet['stops'] as List).cast<Map>();
     final status = trip['status'] as String;
+    final kids = stops.expand((s) => (s['students'] as List).cast<Map>()).toList();
+    final onBus = kids.where((k) => k['status'] == 'BOARDED' || k['status'] == 'HELD').length;
 
     return Scaffold(
       appBar: AppBar(
         title: Text(_morning ? 'Morning pickup' : 'Afternoon drop-off'),
-        actions: [IconButton(icon: const Icon(Icons.report, color: Colors.red), tooltip: 'Report / SOS', onPressed: _incident)],
+        actions: [IconButton(icon: const Icon(Icons.sos, color: Colors.red), tooltip: 'Report a problem', onPressed: _incident)],
       ),
       body: RefreshIndicator(
         onRefresh: _load,
-        child: ListView(padding: const EdgeInsets.fromLTRB(12, 12, 12, 100), children: [
-          Row(children: [
-            StatusChip(status),
-            const SizedBox(width: 8),
-            if (_running)
-              Expanded(
-                child: Text(
-                  _gpsProblem ?? (_last == null ? 'Waiting for GPS…' : 'Sharing location · ${_points.length} to send${_pendingEvents.isEmpty ? '' : ' · ${_pendingEvents.length} marks waiting'}'),
-                  style: TextStyle(fontSize: 12, color: _gpsProblem != null ? Colors.red : Colors.grey.shade700),
-                ),
-              ),
-          ]),
-          if (status == 'SCHEDULED') ...[
-            const SizedBox(height: 16),
-            FilledButton.icon(
-              style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(52)),
-              icon: const Icon(Icons.play_arrow),
-              label: const Text('Start trip'),
-              onPressed: _busy ? null : () => _act(() => Api.instance.post('$_base/start')),
-            ),
-          ],
-          const SizedBox(height: 12),
+        child: ListView(padding: const EdgeInsets.fromLTRB(12, 12, 12, 24), children: [
+          _Banner(
+            title: status == 'SCHEDULED'
+                ? 'Trip not started'
+                : status == 'COMPLETED'
+                    ? 'Trip finished ✓'
+                    : '$onBus on the bus · ${kids.length} today',
+            subtitle: !_running
+                ? null
+                : _gpsProblem ??
+                    (_last == null
+                        ? 'Finding GPS…'
+                        : _pendingEvents.isEmpty
+                            ? 'Parents can see the bus'
+                            : 'No signal — ${_pendingEvents.length} change(s) will be sent'),
+            warn: _gpsProblem != null,
+          ),
+          const SizedBox(height: 10),
           for (final stop in stops) _stopCard(stop),
         ]),
       ),
-      bottomNavigationBar: _running
-          ? SafeArea(
-              child: Padding(
-                padding: const EdgeInsets.all(10),
-                child: Row(children: [
-                  if (_morning && trip['arrivedSchoolAt'] == null)
-                    Expanded(
-                      child: FilledButton(
-                        onPressed: _busy ? null : () async {
-                          if (await _confirm('Reached school?', 'Everyone on the bus will be marked as reached school.')) {
-                            _act(() => Api.instance.post('$_base/arrive-school'));
-                          }
-                        },
-                        child: const Text('Reached school'),
-                      ),
-                    ),
-                  if (!(_morning && trip['arrivedSchoolAt'] == null) && trip['emptyBusCheckedAt'] == null)
-                    Expanded(
-                      child: FilledButton(
-                        style: FilledButton.styleFrom(backgroundColor: Colors.deepOrange),
-                        onPressed: _busy ? null : () async {
-                          if (await _confirm('Empty-bus check', 'Walk to the back of the bus and check every seat. Is the bus empty?')) {
-                            _act(() => Api.instance.post('$_base/empty-bus-check'));
-                          }
-                        },
-                        child: const Text('Bus is empty ✓'),
-                      ),
-                    ),
-                  if (trip['emptyBusCheckedAt'] != null)
-                    Expanded(
-                      child: FilledButton(
-                        style: FilledButton.styleFrom(backgroundColor: Colors.green.shade700),
-                        onPressed: _busy ? null : () => _act(() async {
-                          await _flush();
-                          await Api.instance.post('$_base/end');
-                        }),
-                        child: const Text('End trip'),
-                      ),
-                    ),
-                ]),
-              ),
-            )
-          : null,
+      bottomNavigationBar: _nextStep(trip),
     );
   }
 
@@ -414,40 +433,67 @@ class _TripScreenState extends State<TripScreen> {
     return Card(
       margin: const EdgeInsets.only(bottom: 10),
       child: Padding(
-        padding: const EdgeInsets.all(12),
+        padding: const EdgeInsets.fromLTRB(14, 10, 6, 10),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(children: [
-            CircleAvatar(radius: 14, backgroundColor: arrived ? Colors.green : ink, child: Text('${stop['sequence']}', style: const TextStyle(color: Colors.white, fontSize: 12))),
+            CircleAvatar(radius: 13, backgroundColor: arrived ? Colors.green : ink, child: Text('${stop['sequence']}', style: const TextStyle(color: Colors.white, fontSize: 12))),
             const SizedBox(width: 10),
-            Expanded(child: Text('${stop['name']}', style: const TextStyle(fontWeight: FontWeight.bold))),
+            Expanded(child: Text('${stop['name']}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15))),
             Text('${stop['scheduledTime']}', style: const TextStyle(color: Colors.grey)),
-          ]),
-          if (_running && !arrived)
-            Align(
-              alignment: Alignment.centerLeft,
-              child: TextButton.icon(
+            if (_running && !arrived)
+              IconButton(
+                tooltip: 'Mark this stop reached',
+                icon: const Icon(Icons.flag_outlined),
                 onPressed: _busy ? null : () => _act(() => Api.instance.post('$_base/stops/${stop['routeStopId']}/arrive')),
-                icon: const Icon(Icons.flag, size: 18),
-                label: const Text('Reached this stop'),
-              ),
-            ),
-          if (kids.isEmpty) const Padding(padding: EdgeInsets.only(top: 6), child: Text('No children here today', style: TextStyle(color: Colors.grey))),
+              )
+            else
+              const SizedBox(width: 12),
+          ]),
+          if (kids.isEmpty) const Padding(padding: EdgeInsets.only(top: 6, left: 36), child: Text('No children today', style: TextStyle(color: Colors.grey))),
           for (final k in kids)
             Padding(
-              padding: const EdgeInsets.only(top: 10),
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Row(children: [
-                  Expanded(
-                    child: Text('${k['name']}${k['className'] != null ? '  (Class ${k['className']})' : ''}', style: const TextStyle(fontSize: 15)),
-                  ),
-                  StatusChip(k['status'] as String),
-                ]),
-                if (k['specialInstructions'] != null) Text('Note: ${k['specialInstructions']}', style: const TextStyle(fontSize: 12, color: Colors.deepOrange)),
-                Wrap(children: _actions(k)),
+              padding: const EdgeInsets.only(top: 8, left: 36),
+              child: Row(children: [
+                Expanded(
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Text('${k['name']}', style: const TextStyle(fontSize: 16)),
+                    if (k['specialInstructions'] != null)
+                      Text('${k['specialInstructions']}', style: const TextStyle(fontSize: 12, color: Colors.deepOrange))
+                    else if (k['status'] != 'SCHEDULED')
+                      Text(statusLabel[k['status']] ?? '${k['status']}', style: TextStyle(fontSize: 12, color: statusColor(k['status'] as String))),
+                  ]),
+                ),
+                _studentActions(k),
               ]),
             ),
         ]),
       ),
+    );
+  }
+}
+
+class _Banner extends StatelessWidget {
+  const _Banner({required this.title, this.subtitle, this.warn = false});
+  final String title;
+  final String? subtitle;
+  final bool warn;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(color: warn ? const Color(0xFFFDECEC) : const Color(0xFFE8F0FD), borderRadius: BorderRadius.circular(12)),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(title, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+        if (subtitle != null) ...[
+          const SizedBox(height: 2),
+          Row(children: [
+            Icon(warn ? Icons.gps_off : Icons.circle, size: 10, color: warn ? Colors.red : Colors.green),
+            const SizedBox(width: 6),
+            Expanded(child: Text(subtitle!, style: const TextStyle(fontSize: 13))),
+          ]),
+        ],
+      ]),
     );
   }
 }

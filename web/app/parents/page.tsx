@@ -1,6 +1,7 @@
 'use client';
-import { FormEvent, useState } from 'react';
-import { clean, ErrorNote, Shell, useForm } from '@/components/ui';
+import { useState } from 'react';
+import { CrudPage, Modal } from '@/components/Crud';
+import { Shell } from '@/components/ui';
 import { api, useApi } from '@/lib/api';
 
 export default function Parents() {
@@ -8,73 +9,95 @@ export default function Parents() {
 }
 
 function Body() {
-  const parents = useApi('/admin/parents');
   const students = useApi('/admin/students');
-  const f = useForm({ name: '', phone: '', email: '' });
-  const [link, setLink] = useState<Record<string, string>>({});
+  const [linking, setLinking] = useState<{ parent: any; reload: () => void } | null>(null);
+  const [studentId, setStudentId] = useState('');
   const [error, setError] = useState<string | null>(null);
 
-  async function add(e: FormEvent) {
-    e.preventDefault();
+  async function link() {
+    if (!linking || !studentId) return;
     setError(null);
     try {
-      await api('/admin/parents', { method: 'POST', body: clean(f.values) });
-      f.reset();
-      parents.reload();
-    } catch (err) {
-      setError((err as Error).message);
-    }
-  }
-
-  async function linkChild(parentId: string) {
-    if (!link[parentId]) return;
-    setError(null);
-    try {
-      await api(`/admin/parents/${parentId}/children`, { method: 'POST', body: { studentId: link[parentId] } });
-      parents.reload();
-    } catch (err) {
-      setError((err as Error).message);
+      await api(`/admin/parents/${linking.parent.parentId}/children`, { method: 'POST', body: { studentId } });
+      linking.reload();
+      setLinking(null);
+      setStudentId('');
+    } catch (e) {
+      setError((e as Error).message);
     }
   }
 
   return (
     <>
-      <h1>Parents</h1>
-      <p className="sub">Parents log in to the app with their mobile number. They can also sign up themselves and link a child with the student’s code.</p>
-      <ErrorNote error={error ?? parents.error} />
-      <div className="panel">
-        <h2>Add a parent</h2>
-        <form className="inline" onSubmit={add}>
-          <label>Name<input required {...f.bind('name')} /></label>
-          <label>Mobile number<input required placeholder="98xxxxxxxx" {...f.bind('phone')} /></label>
-          <label>Email (optional)<input type="email" {...f.bind('email')} /></label>
-          <button className="primary">Add parent</button>
-        </form>
-      </div>
-      <div className="panel">
-        <table>
-          <thead><tr><th>Name</th><th>Mobile</th><th>Children</th><th>Link a child</th></tr></thead>
-          <tbody>
-            {(parents.data ?? []).map((p: any) => (
-              <tr key={p.parentId}>
-                <td>{p.name}</td>
-                <td>{p.phone}</td>
-                <td>{p.children.map((c: any) => c.name).join(', ') || <span className="muted">—</span>}</td>
-                <td>
-                  <div className="row">
-                    <select value={link[p.parentId] ?? ''} onChange={(e) => setLink({ ...link, [p.parentId]: e.target.value })} style={{ width: 180 }}>
-                      <option value="">Choose student…</option>
-                      {(students.data ?? []).map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}
-                    </select>
-                    <button onClick={() => linkChild(p.parentId)}>Link</button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        {!parents.data?.length && <p className="empty">No parents yet.</p>}
-      </div>
+      <CrudPage
+        title="Parents"
+        subtitle="Parents log in to the app with their mobile number. They can also sign up themselves and add a child with the student’s code."
+        noun="Parent"
+        listPath="/admin/parents"
+        idOf={(p) => p.parentId}
+        search={(p) => `${p.name} ${p.phone} ${p.children.map((c: any) => c.name).join(' ')}`}
+        fields={[
+          { key: 'name', label: 'Name', required: true },
+          { key: 'phone', label: 'Mobile number', type: 'tel', required: true, placeholder: '98xxxxxxxx' },
+          { key: 'email', label: 'Email (optional)', type: 'email' },
+          { key: 'address', label: 'Home address', only: 'edit' },
+        ]}
+        toForm={(p) => ({ name: p.name, phone: p.phone.replace(/^\+91/, ''), email: p.email ?? '', address: p.address ?? '' })}
+        editPath={(p) => `/admin/parents/${p.parentId}`}
+        deletePath={(p) => `/admin/parents/${p.parentId}`}
+        deleteDetail={() => 'The parent will no longer be able to log in. Their children stay in the system.'}
+        columns={[
+          { label: 'Parent', render: (p) => <div className="name">{p.name}</div> },
+          { label: 'Mobile', render: (p) => p.phone },
+          {
+            label: 'Children',
+            render: (p) => (
+              <div className="chips">
+                {p.children.length === 0 && <span className="muted">None yet</span>}
+                {p.children.map((c: any) => (
+                  <ChildChip key={c.studentId} parentId={p.parentId} child={c} />
+                ))}
+              </div>
+            ),
+          },
+        ]}
+        extraActions={(p, reload) => <button className="link" onClick={() => setLinking({ parent: p, reload })}>+ Child</button>}
+      />
+      {linking && (
+        <Modal title={`Add a child to ${linking.parent.name}`} onClose={() => setLinking(null)}>
+          <div className="stack">
+            {error && <div className="alert bad">{error}</div>}
+            <label className="field">
+              <span className="lbl">Student</span>
+              <select value={studentId} onChange={(e) => setStudentId(e.target.value)}>
+                <option value="">Choose…</option>
+                {(students.data ?? []).map((s: any) => <option key={s.id} value={s.id}>{s.name}{s.className ? ` (Class ${s.className})` : ''}</option>)}
+              </select>
+            </label>
+            <div className="row end">
+              <button onClick={() => setLinking(null)}>Cancel</button>
+              <button className="primary" disabled={!studentId} onClick={link}>Add child</button>
+            </div>
+          </div>
+        </Modal>
+      )}
     </>
+  );
+}
+
+function ChildChip({ parentId, child }: { parentId: string; child: any }) {
+  const [gone, setGone] = useState(false);
+  if (gone) return null;
+  return (
+    <span className="chip">
+      {child.name}
+      <button
+        title="Remove from this parent"
+        onClick={async () => {
+          await api(`/admin/parents/${parentId}/children/${child.studentId}`, { method: 'DELETE' });
+          setGone(true);
+        }}
+      >✕</button>
+    </span>
   );
 }

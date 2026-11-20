@@ -14,16 +14,10 @@ export function Pill({ status }: { status: string }) {
   return <span className={`pill ${STATUS_TONE[status] ?? 'muted'}`}>{STATUS_LABEL[status] ?? status}</span>;
 }
 
-const NAV = [
-  ['/dashboard/', 'Dashboard'],
-  ['/trips/', 'Trips'],
-  ['/students/', 'Students'],
-  ['/parents/', 'Parents'],
-  ['/routes/', 'Routes'],
-  ['/stops/', 'Stops'],
-  ['/schools/', 'Schools'],
-  ['/buses/', 'Buses'],
-  ['/staff/', 'Drivers & staff'],
+const NAV: [string, [string, string, string][]][] = [
+  ['Today', [['/dashboard/', '◉', 'Live view'], ['/trips/', '⇄', 'Trips']]],
+  ['People', [['/students/', '☺', 'Students'], ['/parents/', '⌂', 'Parents'], ['/staff/', '☰', 'Drivers & staff']]],
+  ['Setup', [['/routes/', '↝', 'Routes'], ['/stops/', '●', 'Stops'], ['/buses/', '▭', 'Buses'], ['/schools/', '▲', 'Schools']]],
 ];
 
 /** Page frame with navigation. Sends anyone not logged in to /login. */
@@ -42,8 +36,15 @@ export function Shell({ children }: { children: ReactNode }) {
     <div className="layout">
       <nav className="side">
         <div className="logo"><span>🚌</span> School Bus</div>
-        {NAV.map(([href, label]) => (
-          <Link key={href} href={href} className={path?.startsWith(href) ? 'on' : ''}>{label}</Link>
+        {NAV.map(([section, items]) => (
+          <div key={section} className="navgroup">
+            <div className="navlabel">{section}</div>
+            {items.map(([href, ico, label]) => (
+              <Link key={href} href={href} className={path?.startsWith(href) || (href === '/routes/' && path?.startsWith('/route-detail')) || (href === '/trips/' && path?.startsWith('/trip/')) ? 'on' : ''}>
+                <span className="ico">{ico}</span>{label}
+              </Link>
+            ))}
+          </div>
         ))}
         <div className="grow" />
         <a className="apk" href={APK_URL}>Download Android app</a>

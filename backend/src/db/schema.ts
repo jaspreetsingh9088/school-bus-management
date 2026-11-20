@@ -63,6 +63,8 @@ export const users = pgTable('users', {
   photoUrl: text('photo_url'),
   active: boolean('active').notNull().default(true),
   lastLoginAt: ts('last_login_at'),
+  /** Set when archived instead of deleted (the record has trip history) */
+  deletedAt: ts('deleted_at'),
   createdAt: createdAt(),
 }, (t) => [
   uniqueIndex('users_company_phone_uq').on(t.companyId, t.phone),
@@ -134,6 +136,8 @@ export const schools = pgTable('schools', {
   email: text('email'),
   /** e.g. [{"label":"Primary","start":"08:00","end":"13:30"}] */
   timings: jsonb('timings').notNull().default([]),
+  /** Set when archived instead of deleted (the record has trip history) */
+  deletedAt: ts('deleted_at'),
   createdAt: createdAt(),
 }, (t) => [index('schools_company_idx').on(t.companyId)]);
 
@@ -155,6 +159,8 @@ export const students = pgTable('students', {
   serviceEnd: date('service_end', { mode: 'string' }),
   /** Code the company gives a parent to link this student to their account */
   activationCode: text('activation_code').unique(),
+  /** Set when archived instead of deleted (the record has trip history) */
+  deletedAt: ts('deleted_at'),
   createdAt: createdAt(),
 }, (t) => [index('students_company_school_idx').on(t.companyId, t.schoolId)]);
 
@@ -206,6 +212,8 @@ export const stops = pgTable('stops', {
   address: text('address'),
   lat: doublePrecision('lat').notNull(),
   lng: doublePrecision('lng').notNull(),
+  /** Set when archived instead of deleted (the record has trip history) */
+  deletedAt: ts('deleted_at'),
 }, (t) => [index('stops_company_idx').on(t.companyId)]);
 
 // ───────────── Operations ─────────────
@@ -224,6 +232,8 @@ export const buses = pgTable('buses', {
   fitnessExpiry: date('fitness_expiry', { mode: 'string' }),
   permitExpiry: date('permit_expiry', { mode: 'string' }),
   status: busStatusEnum('status').notNull().default('ACTIVE'),
+  /** Set when archived instead of deleted (the record has trip history) */
+  deletedAt: ts('deleted_at'),
   createdAt: createdAt(),
 }, (t) => [uniqueIndex('buses_company_reg_uq').on(t.companyId, t.registrationNumber)]);
 
@@ -246,6 +256,8 @@ export const routes = pgTable('routes', {
   driverId: uuid('driver_id').references(() => users.id),
   attendantId: uuid('attendant_id').references(() => users.id),
   active: boolean('active').notNull().default(true),
+  /** Set when archived instead of deleted (the record has trip history) */
+  deletedAt: ts('deleted_at'),
   createdAt: createdAt(),
 }, (t) => [index('routes_company_idx').on(t.companyId)]);
 

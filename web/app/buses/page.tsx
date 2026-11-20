@@ -1,75 +1,50 @@
 'use client';
-import { FormEvent, useState } from 'react';
-import { clean, ErrorNote, Pill, Shell, useForm } from '@/components/ui';
-import { api, useApi } from '@/lib/api';
+import { CrudPage } from '@/components/Crud';
+import { Pill, Shell } from '@/components/ui';
 
 export default function Buses() {
   return <Shell><Body /></Shell>;
 }
 
+const soon = (d?: string | null) => !!d && new Date(d).getTime() - Date.now() < 30 * 86_400_000;
+const docs = (b: any) => [['Insurance', b.insuranceExpiry], ['Fitness', b.fitnessExpiry], ['Permit', b.permitExpiry]] as [string, string | null][];
+
 function Body() {
-  const buses = useApi('/admin/buses');
-  const f = useForm({ registrationNumber: '', fleetNumber: '', capacity: '', model: '', insuranceExpiry: '', fitnessExpiry: '', permitExpiry: '' });
-  const [error, setError] = useState<string | null>(null);
-
-  async function add(e: FormEvent) {
-    e.preventDefault();
-    setError(null);
-    try {
-      await api('/admin/buses', { method: 'POST', body: { ...clean(f.values), capacity: Number(f.values.capacity) } });
-      f.reset();
-      buses.reload();
-    } catch (err) {
-      setError((err as Error).message);
-    }
-  }
-
-  async function setStatus(id: string, status: string) {
-    await api(`/admin/buses/${id}`, { method: 'PATCH', body: { status } });
-    buses.reload();
-  }
-
   return (
-    <>
-      <h1>Buses</h1>
-      <ErrorNote error={error ?? buses.error} />
-      <div className="panel">
-        <h2>Add a bus</h2>
-        <form className="inline" onSubmit={add}>
-          <label>Registration number<input required placeholder="PB10AB1234" {...f.bind('registrationNumber')} /></label>
-          <label>Fleet name / number<input {...f.bind('fleetNumber')} /></label>
-          <label>Seats<input required type="number" min={1} {...f.bind('capacity')} /></label>
-          <label>Model<input {...f.bind('model')} /></label>
-          <label>Insurance expiry<input type="date" {...f.bind('insuranceExpiry')} /></label>
-          <label>Fitness expiry<input type="date" {...f.bind('fitnessExpiry')} /></label>
-          <label>Permit expiry<input type="date" {...f.bind('permitExpiry')} /></label>
-          <button className="primary">Add bus</button>
-        </form>
-      </div>
-      <div className="panel">
-        <table>
-          <thead><tr><th>Registration</th><th>Fleet</th><th>Seats</th><th>Insurance</th><th>Fitness</th><th>Permit</th><th>Status</th></tr></thead>
-          <tbody>
-            {(buses.data ?? []).map((b: any) => (
-              <tr key={b.id}>
-                <td><b>{b.registrationNumber}</b></td>
-                <td>{b.fleetNumber ?? '—'}</td>
-                <td>{b.capacity}</td>
-                <td>{b.insuranceExpiry ?? '—'}</td>
-                <td>{b.fitnessExpiry ?? '—'}</td>
-                <td>{b.permitExpiry ?? '—'}</td>
-                <td>
-                  <div className="row"><Pill status={b.status} />
-                    <select value={b.status} onChange={(e) => setStatus(b.id, e.target.value)} style={{ width: 130 }}>
-                      <option value="ACTIVE">Active</option><option value="MAINTENANCE">Maintenance</option><option value="INACTIVE">Inactive</option>
-                    </select>
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </>
+    <CrudPage
+      title="Buses"
+      noun="Bus"
+      listPath="/admin/buses"
+      search={(b) => `${b.registrationNumber} ${b.fleetNumber ?? ''}`}
+      fields={[
+        { key: 'registrationNumber', label: 'Registration number', required: true, placeholder: 'PB10AB1234' },
+        { key: 'fleetNumber', label: 'Bus name or number', placeholder: 'e.g. Bus 7' },
+        { key: 'capacity', label: 'Seats', type: 'number', required: true },
+        { key: 'insuranceExpiry', label: 'Insurance valid until', type: 'date' },
+        { key: 'fitnessExpiry', label: 'Fitness certificate valid until', type: 'date' },
+        { key: 'permitExpiry', label: 'Permit valid until', type: 'date' },
+        { key: 'status', label: 'Status', type: 'select', only: 'edit', options: [{ value: 'ACTIVE', label: 'Active' }, { value: 'MAINTENANCE', label: 'In maintenance' }, { value: 'INACTIVE', label: 'Not in use' }] },
+      ]}
+      toForm={(b) => ({ registrationNumber: b.registrationNumber, fleetNumber: b.fleetNumber ?? '', capacity: b.capacity, insuranceExpiry: b.insuranceExpiry ?? '', fitnessExpiry: b.fitnessExpiry ?? '', permitExpiry: b.permitExpiry ?? '', status: b.status })}
+      toBody={(v) => {
+        const body: Record<string, any> = { ...v, capacity: Number(v.capacity) };
+        for (const k of ['insuranceExpiry', 'fitnessExpiry', 'permitExpiry', 'fleetNumber']) if (body[k] === '') delete body[k];
+        return body;
+      }}
+      editPath={(b) => `/admin/buses/${b.id}`}
+      deletePath={(b) => `/admin/buses/${b.id}`}
+      columns={[
+        { label: 'Bus', render: (b) => <><div className="name">{b.registrationNumber}</div><div className="sub2">{b.fleetNumber ?? ''}</div></> },
+        { label: 'Seats', render: (b) => b.capacity },
+        {
+          label: 'Documents',
+          render: (b) => {
+            const due = docs(b).filter(([, d]) => soon(d));
+            return due.length ? <span className="pill bad">{due.map(([n]) => n).join(', ')} due</span> : <span className="muted small">OK</span>;
+          },
+        },
+        { label: 'Status', render: (b) => <Pill status={b.status} /> },
+      ]}
+    />
   );
 }

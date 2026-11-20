@@ -1,75 +1,57 @@
 'use client';
-import { FormEvent, useState } from 'react';
-import { clean, ErrorNote, Pill, Shell, useForm } from '@/components/ui';
-import { api, timeAgo, useApi } from '@/lib/api';
+import { CrudPage } from '@/components/Crud';
+import { Pill, Shell } from '@/components/ui';
+import { api, timeAgo } from '@/lib/api';
 
 export default function Staff() {
   return <Shell><Body /></Shell>;
 }
 
 const ROLE: Record<string, string> = { DRIVER: 'Driver', ATTENDANT: 'Attendant', OFFICE_STAFF: 'Office staff', COMPANY_ADMIN: 'Admin' };
+const office = (v: Record<string, any>) => v.role === 'OFFICE_STAFF' || v.role === 'COMPANY_ADMIN';
 
 function Body() {
-  const staff = useApi('/admin/staff');
-  const f = useForm({ role: 'DRIVER', name: '', phone: '', email: '', password: '', licenseNumber: '', licenseExpiry: '' });
-  const [error, setError] = useState<string | null>(null);
-  const office = f.values.role === 'OFFICE_STAFF' || f.values.role === 'COMPANY_ADMIN';
-
-  async function add(e: FormEvent) {
-    e.preventDefault();
-    setError(null);
-    try {
-      await api('/admin/staff', { method: 'POST', body: clean(f.values) });
-      f.reset();
-      staff.reload();
-    } catch (err) {
-      setError((err as Error).message);
-    }
-  }
-
-  async function toggle(id: string, active: boolean) {
-    await api(`/admin/users/${id}/active/${active}`, { method: 'POST' });
-    staff.reload();
-  }
-
   return (
-    <>
-      <h1>Drivers & staff</h1>
-      <p className="sub">Drivers and attendants log in to the app with their mobile number. Office staff log in here with email and password.</p>
-      <ErrorNote error={error ?? staff.error} />
-      <div className="panel">
-        <h2>Add a person</h2>
-        <form className="inline" onSubmit={add}>
-          <label>Role
-            <select {...f.bind('role')}>{Object.entries(ROLE).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select>
-          </label>
-          <label>Name<input required {...f.bind('name')} /></label>
-          <label>Mobile number<input required {...f.bind('phone')} /></label>
-          {office && <label>Email<input type="email" required {...f.bind('email')} /></label>}
-          {office && <label>Password<input type="password" required minLength={8} {...f.bind('password')} /></label>}
-          {f.values.role === 'DRIVER' && <label>Licence number<input {...f.bind('licenseNumber')} /></label>}
-          {f.values.role === 'DRIVER' && <label>Licence expiry<input type="date" {...f.bind('licenseExpiry')} /></label>}
-          <button className="primary">Add</button>
-        </form>
-      </div>
-      <div className="panel">
-        <table>
-          <thead><tr><th>Name</th><th>Role</th><th>Mobile</th><th>Licence</th><th>Last login</th><th>Status</th><th /></tr></thead>
-          <tbody>
-            {(staff.data ?? []).map((u: any) => (
-              <tr key={u.id}>
-                <td>{u.name}</td>
-                <td>{ROLE[u.role] ?? u.role}</td>
-                <td>{u.phone}</td>
-                <td>{u.licenseNumber ? `${u.licenseNumber} (to ${u.licenseExpiry ?? '?'})` : '—'}</td>
-                <td className="muted">{u.lastLoginAt ? timeAgo(u.lastLoginAt) : 'never'}</td>
-                <td><Pill status={u.active ? 'ACTIVE' : 'INACTIVE'} /></td>
-                <td><button onClick={() => toggle(u.id, !u.active)}>{u.active ? 'Deactivate' : 'Activate'}</button></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </>
+    <CrudPage
+      title="Drivers & staff"
+      subtitle="Drivers and attendants log in to the app with their mobile number. Office staff log in here with email and password."
+      noun="Person"
+      listPath="/admin/staff"
+      addPath="/admin/staff"
+      search={(u) => `${u.name} ${u.phone} ${ROLE[u.role]}`}
+      fields={[
+        { key: 'role', label: 'Job', type: 'select', required: true, only: 'add', options: Object.entries(ROLE).map(([value, label]) => ({ value, label })) },
+        { key: 'name', label: 'Name', required: true },
+        { key: 'phone', label: 'Mobile number', type: 'tel', required: true },
+        { key: 'email', label: 'Email', type: 'email', required: true, when: office },
+        { key: 'password', label: 'Password', type: 'password', required: true, when: office, hint: 'At least 8 characters. Leave empty to keep the current one.' },
+        { key: 'licenseNumber', label: 'Driving licence number', when: (v) => v.role === 'DRIVER' },
+        { key: 'licenseExpiry', label: 'Licence expiry', type: 'date', when: (v) => v.role === 'DRIVER' },
+      ]}
+      toForm={(u) => ({ role: u.role, name: u.name, phone: u.phone.replace(/^\+91/, ''), email: u.email ?? '', licenseNumber: u.licenseNumber ?? '', licenseExpiry: u.licenseExpiry ?? '' })}
+      toBody={(v, isEdit) => {
+        const { role, ...rest } = v;
+        const body: Record<string, any> = isEdit ? rest : v;
+        if (!office(v)) { delete body.email; delete body.password; }
+        if (v.role !== 'DRIVER') { delete body.licenseNumber; delete body.licenseExpiry; }
+        if (isEdit && !body.password) delete body.password;
+        if (isEdit && body.licenseExpiry === '') delete body.licenseExpiry;
+        return body;
+      }}
+      editPath={(u) => `/admin/staff/${u.id}`}
+      deletePath={(u) => `/admin/staff/${u.id}`}
+      columns={[
+        { label: 'Name', render: (u) => <><div className="name">{u.name}</div><div className="sub2">{ROLE[u.role] ?? u.role}</div></> },
+        { label: 'Mobile', render: (u) => u.phone },
+        { label: 'Licence', render: (u) => (u.licenseNumber ? <>{u.licenseNumber}<div className="sub2">valid to {u.licenseExpiry ?? '?'}</div></> : <span className="muted">—</span>) },
+        { label: 'Last login', render: (u) => <span className="muted">{u.lastLoginAt ? timeAgo(u.lastLoginAt) : 'never'}</span> },
+        { label: 'Status', render: (u) => <Pill status={u.active ? 'ACTIVE' : 'INACTIVE'} /> },
+      ]}
+      extraActions={(u, reload) => (
+        <button className="link" onClick={async () => { await api(`/admin/users/${u.id}/active/${!u.active}`, { method: 'POST' }); reload(); }}>
+          {u.active ? 'Block login' : 'Allow login'}
+        </button>
+      )}
+    />
   );
 }

@@ -1,12 +1,12 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
-import { and, asc, count, eq, gte, inArray, isNotNull, lte, or, sql } from 'drizzle-orm';
+import { and, asc, count, eq, gte, inArray, isNotNull, isNull, lte, or, sql } from 'drizzle-orm';
 import { AuthGuard } from '../common/auth';
 import { CompanySettingsService } from '../common/company-settings.service';
 import { activationCode, hashPassword, normalizePhone } from '../common/passwords';
 import { zoned } from '../common/time';
 import { Db, InjectDb } from '../db/db.module';
 import {
-  authorizedAdults, buses, companies, incidents, parents, parentStudents, routes, routeStops, schools,
+  authorizedAdults, buses, companies, holidays, incidents, parents, parentStudents, routes, routeStops, schools,
   staffProfiles, stops, studentAssignments, students, trips, tripStudents, users,
 } from '../db/schema';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -69,10 +69,11 @@ export class AdminService {
         id: users.id, role: users.role, name: users.name, phone: users.phone, email: users.email, active: users.active,
         licenseNumber: staffProfiles.licenseNumber, licenseExpiry: staffProfiles.licenseExpiry,
         policeVerified: staffProfiles.policeVerified, lastLoginAt: users.lastLoginAt,
+        address: staffProfiles.address, emergencyContact: staffProfiles.emergencyContact,
       })
       .from(users)
       .leftJoin(staffProfiles, eq(staffProfiles.userId, users.id))
-      .where(and(eq(users.companyId, companyId), inArray(users.role, ['DRIVER', 'ATTENDANT', 'OFFICE_STAFF', 'COMPANY_ADMIN'])))
+      .where(and(eq(users.companyId, companyId), isNull(users.deletedAt), inArray(users.role, ['DRIVER', 'ATTENDANT', 'OFFICE_STAFF', 'COMPANY_ADMIN'])))
       .orderBy(asc(users.name));
   }
 
@@ -266,9 +267,10 @@ export class AdminService {
 
   async listParents(companyId: string) {
     const rows = await this.db
-      .select({ parentId: parents.id, userId: users.id, name: users.name, phone: users.phone, email: users.email, active: users.active })
+      .select({ parentId: parents.id, userId: users.id, name: users.name, phone: users.phone, email: users.email, active: users.active,
+        address: parents.address, emergencyContactName: parents.emergencyContactName, emergencyContactPhone: parents.emergencyContactPhone })
       .from(parents).innerJoin(users, eq(users.id, parents.userId))
-      .where(eq(parents.companyId, companyId)).orderBy(asc(users.name));
+      .where(and(eq(parents.companyId, companyId), isNull(users.deletedAt))).orderBy(asc(users.name));
     const links = rows.length
       ? await this.db.select({ parentId: parentStudents.parentId, studentId: students.id, name: students.name })
         .from(parentStudents).innerJoin(students, eq(students.id, parentStudents.studentId))
@@ -302,6 +304,183 @@ export class AdminService {
     return { linked: true };
   }
 
+  // ───────────── Edit and delete ─────────────
+  // Records with trip history are archived (hidden, kept for safety records); others are deleted.
+
+  private archivedPhone(phone: string, id: string) {
+    return `${phone}#archived-${id.slice(0, 8)}`;
+  }
+
+  async updateStaff(companyId: string, userId: string, dto: Partial<StaffDto>) {
+    const [u] = await this.db.select().from(users).where(and(eq(users.id, userId), eq(users.companyId, companyId), isNull(users.deletedAt)));
+    if (!u || u.role === 'PARENT' || u.role === 'SUPER_ADMIN') throw new NotFoundException('Person not found');
+    try {
+      await this.db.update(users).set({
+        ...(dto.name ? { name: dto.name } : {}),
+        ...(dto.phone ? { phone: this.phone(dto.phone) } : {}),
+        ...(dto.email !== undefined ? { email: dto.email ? dto.email.toLowerCase() : null } : {}),
+        ...(dto.password ? { passwordHash: await hashPassword(dto.password) } : {}),
+      }).where(eq(users.id, userId));
+    } catch (e) {
+      throw uniqueToConflict(e, 'A user with this phone number');
+    }
+    if (u.role === 'DRIVER' || u.role === 'ATTENDANT') {
+      const profile = {
+        ...(dto.licenseNumber !== undefined ? { licenseNumber: dto.licenseNumber || null } : {}),
+        ...(dto.licenseExpiry !== undefined ? { licenseExpiry: dto.licenseExpiry || null } : {}),
+        ...(dto.address !== undefined ? { address: dto.address || null } : {}),
+        ...(dto.emergencyContact !== undefined ? { emergencyContact: dto.emergencyContact || null } : {}),
+        ...(dto.policeVerified !== undefined ? { policeVerified: dto.policeVerified } : {}),
+      };
+      if (Object.keys(profile).length) await this.db.update(staffProfiles).set(profile).where(eq(staffProfiles.userId, userId));
+    }
+    return { updated: true };
+  }
+
+  async removeStaff(companyId: string, userId: string, me: string) {
+    if (userId === me) throw new BadRequestException('You cannot delete your own account');
+    const [u] = await this.db.select().from(users).where(and(eq(users.id, userId), eq(users.companyId, companyId), isNull(users.deletedAt)));
+    if (!u || u.role === 'PARENT' || u.role === 'SUPER_ADMIN') throw new NotFoundException('Person not found');
+    if (u.role === 'COMPANY_ADMIN') {
+      const [{ n }] = await this.db.select({ n: count() }).from(users)
+        .where(and(eq(users.companyId, companyId), eq(users.role, 'COMPANY_ADMIN'), eq(users.active, true), isNull(users.deletedAt)));
+      if (n <= 1) throw new BadRequestException('The company needs at least one admin');
+    }
+    await this.db.update(routes).set({ driverId: null }).where(eq(routes.driverId, userId));
+    await this.db.update(routes).set({ attendantId: null }).where(eq(routes.attendantId, userId));
+    const [{ n }] = await this.db.select({ n: count() }).from(trips)
+      .where(or(eq(trips.driverId, userId), eq(trips.attendantId, userId)));
+    this.guard.forget(userId);
+    if (n > 0) {
+      await this.db.update(users).set({ active: false, deletedAt: new Date(), phone: this.archivedPhone(u.phone, u.id), email: null })
+        .where(eq(users.id, userId));
+      return { archived: true };
+    }
+    await this.db.delete(users).where(eq(users.id, userId));
+    return { deleted: true };
+  }
+
+  async updateParent(companyId: string, parentId: string, dto: Partial<ParentDto>) {
+    const [p] = await this.db.select().from(parents).where(and(eq(parents.id, parentId), eq(parents.companyId, companyId)));
+    if (!p) throw new NotFoundException('Parent not found');
+    try {
+      await this.db.update(users).set({
+        ...(dto.name ? { name: dto.name } : {}),
+        ...(dto.phone ? { phone: this.phone(dto.phone) } : {}),
+        ...(dto.email !== undefined ? { email: dto.email ? dto.email.toLowerCase() : null } : {}),
+      }).where(eq(users.id, p.userId));
+    } catch (e) {
+      throw uniqueToConflict(e, 'A user with this phone number');
+    }
+    await this.db.update(parents).set({
+      ...(dto.address !== undefined ? { address: dto.address || null } : {}),
+      ...(dto.emergencyContactName !== undefined ? { emergencyContactName: dto.emergencyContactName || null } : {}),
+      ...(dto.emergencyContactPhone !== undefined ? { emergencyContactPhone: dto.emergencyContactPhone || null } : {}),
+    }).where(eq(parents.id, parentId));
+    return { updated: true };
+  }
+
+  /** Parents are archived, never hard-deleted, so their consent records stay (DPDP). */
+  async removeParent(companyId: string, parentId: string) {
+    const [p] = await this.db.select({ parent: parents, user: users }).from(parents).innerJoin(users, eq(users.id, parents.userId))
+      .where(and(eq(parents.id, parentId), eq(parents.companyId, companyId), isNull(users.deletedAt)));
+    if (!p) throw new NotFoundException('Parent not found');
+    await this.db.delete(parentStudents).where(eq(parentStudents.parentId, parentId));
+    await this.db.update(users).set({ active: false, deletedAt: new Date(), phone: this.archivedPhone(p.user.phone, p.user.id), email: null })
+      .where(eq(users.id, p.user.id));
+    this.guard.forget(p.user.id);
+    return { archived: true };
+  }
+
+  async unlinkParentStudent(companyId: string, parentId: string, studentId: string) {
+    const [p] = await this.db.select().from(parents).where(and(eq(parents.id, parentId), eq(parents.companyId, companyId)));
+    if (!p) throw new NotFoundException('Parent not found');
+    await this.db.delete(parentStudents).where(and(eq(parentStudents.parentId, parentId), eq(parentStudents.studentId, studentId)));
+    return { unlinked: true };
+  }
+
+  async removeStudent(companyId: string, studentId: string) {
+    await this.students.get(companyId, studentId);
+    await this.db.delete(studentAssignments).where(eq(studentAssignments.studentId, studentId));
+    const [{ n }] = await this.db.select({ n: count() }).from(tripStudents).where(eq(tripStudents.studentId, studentId));
+    if (n > 0) {
+      await this.db.delete(parentStudents).where(eq(parentStudents.studentId, studentId));
+      await this.db.update(students).set({ status: 'INACTIVE', deletedAt: new Date(), activationCode: null }).where(eq(students.id, studentId));
+      return { archived: true };
+    }
+    await this.db.delete(students).where(eq(students.id, studentId));
+    return { deleted: true };
+  }
+
+  async removeRoute(companyId: string, routeId: string) {
+    await this.routes.get(companyId, routeId);
+    const [{ n }] = await this.db.select({ n: count() }).from(trips).where(eq(trips.routeId, routeId));
+    if (n > 0) {
+      await this.db.delete(studentAssignments).where(eq(studentAssignments.routeId, routeId));
+      await this.db.update(routes).set({ active: false, deletedAt: new Date() }).where(eq(routes.id, routeId));
+      return { archived: true };
+    }
+    await this.db.delete(routes).where(eq(routes.id, routeId));
+    return { deleted: true };
+  }
+
+  async removeAssignment(companyId: string, routeId: string, studentId: string) {
+    await this.routes.get(companyId, routeId);
+    await this.db.delete(studentAssignments).where(and(eq(studentAssignments.routeId, routeId), eq(studentAssignments.studentId, studentId)));
+    return { removed: true };
+  }
+
+  async removeBus(companyId: string, busId: string) {
+    await this.buses.get(companyId, busId);
+    await this.db.update(routes).set({ busId: null }).where(eq(routes.busId, busId));
+    const [{ n }] = await this.db.select({ n: count() }).from(trips).where(eq(trips.busId, busId));
+    if (n > 0) {
+      await this.db.update(buses).set({ status: 'INACTIVE', deletedAt: new Date() }).where(eq(buses.id, busId));
+      return { archived: true };
+    }
+    await this.db.delete(buses).where(eq(buses.id, busId));
+    return { deleted: true };
+  }
+
+  async removeStop(companyId: string, stopId: string) {
+    await this.stops.get(companyId, stopId);
+    const used = await this.db.selectDistinct({ name: routes.name }).from(routeStops)
+      .innerJoin(routes, eq(routes.id, routeStops.routeId))
+      .where(and(eq(routeStops.stopId, stopId), isNull(routes.deletedAt)));
+    if (used.length) throw new ConflictException(`Remove this stop from these routes first: ${used.map((r) => r.name).join(', ')}`);
+    const [{ n }] = await this.db.select({ n: count() }).from(routeStops).where(eq(routeStops.stopId, stopId));
+    if (n > 0) {
+      await this.db.update(stops).set({ deletedAt: new Date() }).where(eq(stops.id, stopId));
+      return { archived: true };
+    }
+    await this.db.delete(stops).where(eq(stops.id, stopId));
+    return { deleted: true };
+  }
+
+  async removeSchool(companyId: string, schoolId: string) {
+    await this.schools.get(companyId, schoolId);
+    const [{ kids }] = await this.db.select({ kids: count() }).from(students)
+      .where(and(eq(students.schoolId, schoolId), isNull(students.deletedAt)));
+    const [{ live }] = await this.db.select({ live: count() }).from(routes)
+      .where(and(eq(routes.schoolId, schoolId), isNull(routes.deletedAt)));
+    if (kids || live) throw new ConflictException(`This school still has ${kids} student(s) and ${live} route(s). Delete or move them first.`);
+    const [{ n }] = await this.db.select({ n: count() }).from(routes).where(eq(routes.schoolId, schoolId));
+    const [{ m }] = await this.db.select({ m: count() }).from(students).where(eq(students.schoolId, schoolId));
+    if (n || m) {
+      await this.db.update(schools).set({ deletedAt: new Date() }).where(eq(schools.id, schoolId));
+      return { archived: true };
+    }
+    await this.db.delete(holidays).where(eq(holidays.schoolId, schoolId));
+    await this.db.delete(schools).where(eq(schools.id, schoolId));
+    return { deleted: true };
+  }
+
+  async removeHoliday(companyId: string, id: string) {
+    const rows = await this.db.delete(holidays).where(and(eq(holidays.id, id), eq(holidays.companyId, companyId))).returning();
+    if (!rows.length) throw new NotFoundException('Holiday not found');
+    return { deleted: true };
+  }
+
   // ───────────── Dashboard and announcements ─────────────
 
   async dashboard(companyId: string) {
@@ -311,11 +490,11 @@ export class AdminService {
 
     const countOf = async (q: Promise<{ n: number }[]>) => (await q)[0].n;
     const [parentsN, studentsN, busesActive, driversN, routesN] = await Promise.all([
-      countOf(this.db.select({ n: count() }).from(parents).where(eq(parents.companyId, companyId))),
+      countOf(this.db.select({ n: count() }).from(parents).innerJoin(users, eq(users.id, parents.userId)).where(and(eq(parents.companyId, companyId), isNull(users.deletedAt)))),
       countOf(this.db.select({ n: count() }).from(students).where(and(eq(students.companyId, companyId), eq(students.status, 'ACTIVE')))),
-      countOf(this.db.select({ n: count() }).from(buses).where(and(eq(buses.companyId, companyId), eq(buses.status, 'ACTIVE')))),
+      countOf(this.db.select({ n: count() }).from(buses).where(and(eq(buses.companyId, companyId), eq(buses.status, 'ACTIVE'), isNull(buses.deletedAt)))),
       countOf(this.db.select({ n: count() }).from(users).where(and(eq(users.companyId, companyId), eq(users.role, 'DRIVER'), eq(users.active, true)))),
-      countOf(this.db.select({ n: count() }).from(routes).where(and(eq(routes.companyId, companyId), eq(routes.active, true)))),
+      countOf(this.db.select({ n: count() }).from(routes).where(and(eq(routes.companyId, companyId), eq(routes.active, true), isNull(routes.deletedAt)))),
     ]);
 
     const todayTrips = await this.db.select().from(trips).where(and(eq(trips.companyId, companyId), eq(trips.date, today)));

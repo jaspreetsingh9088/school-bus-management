@@ -22,6 +22,8 @@ class UpdateStopDto extends PartialType(StopDto) {}
 class UpdateBusDto extends PartialType(BusDto) {}
 class UpdateRouteDto extends PartialType(RouteDto) {}
 class UpdateStudentDto extends PartialType(StudentDto) {}
+class UpdateStaffDto extends PartialType(StaffDto) {}
+class UpdateParentDto extends PartialType(ParentDto) {}
 
 const uuid = new ParseUUIDPipe();
 
@@ -68,7 +70,7 @@ export class AdminController {
   @Post('schools') createSchool(@CurrentUser() u: AuthUser, @Body() dto: SchoolDto) { return this.admin.schools.create(tenantOf(u), { ...dto }); }
   @Get('schools/:id') getSchool(@CurrentUser() u: AuthUser, @Param('id', uuid) id: string) { return this.admin.schools.get(tenantOf(u), id); }
   @Patch('schools/:id') updateSchool(@CurrentUser() u: AuthUser, @Param('id', uuid) id: string, @Body() dto: UpdateSchoolDto) { return this.admin.schools.update(tenantOf(u), id, { ...dto }); }
-  @Delete('schools/:id') deleteSchool(@CurrentUser() u: AuthUser, @Param('id', uuid) id: string) { return this.admin.schools.remove(tenantOf(u), id); }
+  @Delete('schools/:id') deleteSchool(@CurrentUser() u: AuthUser, @Param('id', uuid) id: string) { return this.admin.removeSchool(tenantOf(u), id); }
 
   // Holidays (no trips are generated on these days)
   @Get('holidays') listHolidays(@CurrentUser() u: AuthUser) {
@@ -81,22 +83,26 @@ export class AdminController {
     return row;
   }
 
+  @Delete('holidays/:id') deleteHoliday(@CurrentUser() u: AuthUser, @Param('id', uuid) id: string) { return this.admin.removeHoliday(tenantOf(u), id); }
+
   // Stops
   @Get('stops') listStops(@CurrentUser() u: AuthUser) { return this.admin.stops.list(tenantOf(u)); }
   @Post('stops') createStop(@CurrentUser() u: AuthUser, @Body() dto: StopDto) { return this.admin.stops.create(tenantOf(u), { ...dto }); }
   @Patch('stops/:id') updateStop(@CurrentUser() u: AuthUser, @Param('id', uuid) id: string, @Body() dto: UpdateStopDto) { return this.admin.stops.update(tenantOf(u), id, { ...dto }); }
-  @Delete('stops/:id') deleteStop(@CurrentUser() u: AuthUser, @Param('id', uuid) id: string) { return this.admin.stops.remove(tenantOf(u), id); }
+  @Delete('stops/:id') deleteStop(@CurrentUser() u: AuthUser, @Param('id', uuid) id: string) { return this.admin.removeStop(tenantOf(u), id); }
 
   // Buses
   @Get('buses') listBuses(@CurrentUser() u: AuthUser) { return this.admin.buses.list(tenantOf(u)); }
   @Post('buses') createBus(@CurrentUser() u: AuthUser, @Body() dto: BusDto) { return this.admin.buses.create(tenantOf(u), { ...dto }); }
   @Get('buses/:id') getBus(@CurrentUser() u: AuthUser, @Param('id', uuid) id: string) { return this.admin.buses.get(tenantOf(u), id); }
   @Patch('buses/:id') updateBus(@CurrentUser() u: AuthUser, @Param('id', uuid) id: string, @Body() dto: UpdateBusDto) { return this.admin.buses.update(tenantOf(u), id, { ...dto }); }
-  @Delete('buses/:id') deleteBus(@CurrentUser() u: AuthUser, @Param('id', uuid) id: string) { return this.admin.buses.remove(tenantOf(u), id); }
+  @Delete('buses/:id') deleteBus(@CurrentUser() u: AuthUser, @Param('id', uuid) id: string) { return this.admin.removeBus(tenantOf(u), id); }
 
   // Staff: drivers, attendants, office users
   @Get('staff') listStaff(@CurrentUser() u: AuthUser) { return this.admin.listStaff(tenantOf(u)); }
   @Post('staff') createStaff(@CurrentUser() u: AuthUser, @Body() dto: StaffDto) { return this.admin.createStaff(tenantOf(u), dto); }
+  @Patch('staff/:id') updateStaff(@CurrentUser() u: AuthUser, @Param('id', uuid) id: string, @Body() dto: UpdateStaffDto) { return this.admin.updateStaff(tenantOf(u), id, dto); }
+  @Delete('staff/:id') deleteStaff(@CurrentUser() u: AuthUser, @Param('id', uuid) id: string) { return this.admin.removeStaff(tenantOf(u), id, u.sub); }
   @Post('users/:id/active/:active') @HttpCode(200)
   setActive(@CurrentUser() u: AuthUser, @Param('id', uuid) id: string, @Param('active', ParseBoolPipe) active: boolean) {
     return this.admin.setUserActive(tenantOf(u), id, active);
@@ -108,12 +114,17 @@ export class AdminController {
   @Get('routes/:id') getRoute(@CurrentUser() u: AuthUser, @Param('id', uuid) id: string) { return this.admin.routeDetail(tenantOf(u), id); }
   @Patch('routes/:id') updateRoute(@CurrentUser() u: AuthUser, @Param('id', uuid) id: string, @Body() dto: UpdateRouteDto) { return this.admin.updateRoute(tenantOf(u), id, dto); }
   @Put('routes/:id/stops') setStops(@CurrentUser() u: AuthUser, @Param('id', uuid) id: string, @Body() dto: RouteStopsDto) { return this.admin.setRouteStops(tenantOf(u), id, dto); }
+  @Delete('routes/:id') deleteRoute(@CurrentUser() u: AuthUser, @Param('id', uuid) id: string) { return this.admin.removeRoute(tenantOf(u), id); }
+  @Delete('routes/:id/assignments/:studentId') unassign(@CurrentUser() u: AuthUser, @Param('id', uuid) id: string, @Param('studentId', uuid) sid: string) {
+    return this.admin.removeAssignment(tenantOf(u), id, sid);
+  }
   @Put('routes/:id/assignments') assign(@CurrentUser() u: AuthUser, @Param('id', uuid) id: string, @Body() dto: AssignmentsDto) { return this.admin.assignStudents(tenantOf(u), id, dto); }
 
   // Students
   @Get('students') listStudents(@CurrentUser() u: AuthUser) { return this.admin.students.list(tenantOf(u)); }
   @Post('students') createStudent(@CurrentUser() u: AuthUser, @Body() dto: StudentDto) { return this.admin.createStudent(tenantOf(u), dto); }
   @Get('students/:id') getStudent(@CurrentUser() u: AuthUser, @Param('id', uuid) id: string) { return this.admin.studentDetail(tenantOf(u), id); }
+  @Delete('students/:id') deleteStudent(@CurrentUser() u: AuthUser, @Param('id', uuid) id: string) { return this.admin.removeStudent(tenantOf(u), id); }
   @Patch('students/:id') updateStudent(@CurrentUser() u: AuthUser, @Param('id', uuid) id: string, @Body() dto: UpdateStudentDto) { return this.admin.updateStudent(tenantOf(u), id, dto); }
   @Post('students/:id/approve') @HttpCode(200)
   approveStudent(@CurrentUser() u: AuthUser, @Param('id', uuid) id: string) { return this.admin.updateStudent(tenantOf(u), id, { status: 'ACTIVE' }); }
@@ -135,6 +146,11 @@ export class AdminController {
   // Parents
   @Get('parents') listParents(@CurrentUser() u: AuthUser) { return this.admin.listParents(tenantOf(u)); }
   @Post('parents') createParent(@CurrentUser() u: AuthUser, @Body() dto: ParentDto) { return this.admin.createParent(tenantOf(u), dto); }
+  @Patch('parents/:id') updateParent(@CurrentUser() u: AuthUser, @Param('id', uuid) id: string, @Body() dto: UpdateParentDto) { return this.admin.updateParent(tenantOf(u), id, dto); }
+  @Delete('parents/:id') deleteParent(@CurrentUser() u: AuthUser, @Param('id', uuid) id: string) { return this.admin.removeParent(tenantOf(u), id); }
+  @Delete('parents/:id/children/:studentId') unlink(@CurrentUser() u: AuthUser, @Param('id', uuid) id: string, @Param('studentId', uuid) sid: string) {
+    return this.admin.unlinkParentStudent(tenantOf(u), id, sid);
+  }
   @Post('parents/:id/children') @HttpCode(200)
   link(@CurrentUser() u: AuthUser, @Param('id', uuid) id: string, @Body() dto: LinkStudentDto) {
     return this.admin.linkParentStudent(tenantOf(u), id, dto.studentId, dto.relation);

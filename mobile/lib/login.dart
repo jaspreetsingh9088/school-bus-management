@@ -38,6 +38,7 @@ class _LoginScreenState extends State<LoginScreen> {
         final res = await Api.instance.post('/auth/otp/request', {'phone': _phone.text.trim()});
         setState(() {
           _demoCode = res['demoCode'] as String?;
+          if (_demoCode != null) _code.text = _demoCode!; // demo mode: fill it in for the user
           _step = _Step.code;
         });
       });
@@ -154,7 +155,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   padding: const EdgeInsets.all(12),
                   margin: const EdgeInsets.only(bottom: 12),
                   decoration: BoxDecoration(color: const Color(0xFFFFF4D6), borderRadius: BorderRadius.circular(8)),
-                  child: Text('Demo mode: the code is $_demoCode'),
+                  child: Text('Demo mode: the code $_demoCode is filled in for you. Just tap Log in.'),
                 ),
               TextField(
                 controller: _code,

@@ -438,3 +438,47 @@ describe('company data stays separate', () => {
     expect(secrets[0].n).toBe(0);
   });
 });
+
+describe('editing and deleting records', () => {
+  it('deletes records without history and archives those with trips', async () => {
+    const a = as(S.adminA);
+    // A new bus with no trips is really deleted
+    const bus = (await a.post('/admin/buses', { registrationNumber: 'KA01ZZ0001', capacity: 20 }).expect(201)).body;
+    expect((await a.del(`/admin/buses/${bus.id}`).expect(200)).body).toEqual({ deleted: true });
+    // The bus that ran trips is archived and disappears from the list
+    expect((await a.del(`/admin/buses/${S.bus}`).expect(200)).body).toEqual({ archived: true });
+    expect((await a.get('/admin/buses').expect(200)).body.map((b: any) => b.id)).not.toContain(S.bus);
+    const { rows } = await pool.query('select count(*)::int as n from trips where bus_id = $1', [S.bus]);
+    expect(rows[0].n).toBeGreaterThan(0); // trip history kept
+
+    // A student with trips is archived; the parent's code stops working
+    expect((await a.del(`/admin/students/${S.kids[2].id}`).expect(200)).body).toEqual({ archived: true });
+    expect((await a.get('/admin/students').expect(200)).body.map((s: any) => s.id)).not.toContain(S.kids[2].id);
+  });
+
+  it('edits and archives parents and staff, and frees their phone number', async () => {
+    const a = as(S.adminA);
+    await a.patch(`/admin/parents/${S.parentP.parentId}`, { name: 'Priya S', address: 'MG Road' }).expect(200);
+    const p = (await a.get('/admin/parents').expect(200)).body.find((x: any) => x.parentId === S.parentP.parentId);
+    expect(p).toMatchObject({ name: 'Priya S', address: 'MG Road' });
+    await a.del(`/admin/parents/${S.parentP.parentId}/children/${S.kids[0].id}`).expect(200);
+
+    expect((await a.del(`/admin/parents/${S.parentP.parentId}`).expect(200)).body).toEqual({ archived: true });
+    await as(S.tokenP).get('/parent/children').expect(401); // logged out at once
+    await a.post('/admin/parents', { name: 'Priya again', phone: '9811000001' }).expect(201); // number reusable
+
+    await a.patch(`/admin/staff/${S.otherDriver.id}`, { name: 'Mohan K', licenseNumber: 'PB10-999' }).expect(200);
+    expect((await a.del(`/admin/staff/${S.otherDriver.id}`).expect(200)).body).toEqual({ deleted: true }); // never drove
+    expect((await a.del(`/admin/staff/${S.driver.id}`).expect(200)).body).toEqual({ archived: true });
+    await a.del(`/admin/staff/${S.adminAUserId}`).expect(400); // not yourself
+  });
+
+  it('protects stops and schools that are still in use', async () => {
+    const a = as(S.adminA);
+    const res = await a.del(`/admin/stops/${S.stops[0]}`).expect(409);
+    expect(res.body.message).toMatch(/R7 AM/);
+    await a.del(`/admin/schools/${S.school}`).expect(409);
+    expect((await a.del(`/admin/routes/${S.am}`).expect(200)).body).toEqual({ archived: true });
+    expect((await a.get('/admin/routes').expect(200)).body.map((r: any) => r.id)).not.toContain(S.am);
+  });
+});

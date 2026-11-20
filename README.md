@@ -8,7 +8,13 @@ Live bus tracking, safe pickup and drop-off records, and transport admin for sch
 | Admin web panel (Next.js) | `web/` | Vercel |
 | Android app for parents, drivers and attendants (Flutter) | `mobile/` | APK from GitHub Releases |
 
-**Android app:** https://github.com/jaspreetsingh9088/school-bus-management/releases/latest/download/school-bus.apk
+## Live demo
+
+| What | Link |
+| --- | --- |
+| Admin panel | https://school-bus-admin-jade.vercel.app |
+| API | https://school-bus-management-api.vercel.app/api/v1/health |
+| Android app (APK) | https://github.com/jaspreetsingh9088/school-bus-management/releases/latest/download/school-bus.apk |
 
 ## CI/CD
 

@@ -36,13 +36,13 @@ export function Modal({ title, onClose, children, wide }: { title: string; onClo
   );
 }
 
-export function Confirm({ text, detail, onYes, onNo, busy }: { text: string; detail?: string; onYes: () => void; onNo: () => void; busy?: boolean }) {
+export function Confirm({ text, detail, onYes, onNo, busy, yesLabel = 'Delete' }: { text: string; detail?: string; onYes: () => void; onNo: () => void; busy?: boolean; yesLabel?: string }) {
   return (
     <Modal title={text} onClose={onNo}>
       {detail && <p className="muted">{detail}</p>}
       <div className="row end">
         <button onClick={onNo}>Cancel</button>
-        <button className="danger-fill" onClick={onYes} disabled={busy}>{busy ? 'Deleting…' : 'Delete'}</button>
+        <button className="danger-fill" onClick={onYes} disabled={busy}>{busy ? 'Please wait…' : yesLabel}</button>
       </div>
     </Modal>
   );

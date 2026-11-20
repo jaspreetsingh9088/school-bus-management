@@ -36,7 +36,7 @@ function Body() {
         </div>
         {note && <div className="alert good">{note}</div>}
         <ErrorNote error={error ?? trips.error} />
-        <TripTable rows={trips.data ?? []} />
+        <TripTable rows={trips.data ?? []} onChanged={trips.reload} />
       </div>
     </>
   );

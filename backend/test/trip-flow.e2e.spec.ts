@@ -439,6 +439,21 @@ describe('company data stays separate', () => {
   });
 });
 
+describe('stopping and deleting trips', () => {
+  it('stops a running trip, then deletes it', async () => {
+    const a = as(S.adminA);
+    const tomorrow = zoned(new Date(Date.now() + 86_400_000), 'Asia/Kolkata').date;
+    const trips = (await a.get(`/admin/trips?date=${tomorrow}`).expect(200)).body;
+    const id = trips[0].trip.id;
+    await pool.query("update trips set status = 'IN_PROGRESS' where id = $1", [id]);
+    await a.del(`/admin/trips/${id}`).expect(409); // running
+    expect((await a.post(`/admin/trips/${id}/cancel`).expect(200)).body.status).toBe('CANCELLED');
+    expect((await a.del(`/admin/trips/${id}`).expect(200)).body).toEqual({ deleted: true });
+    await a.get(`/admin/trips/${id}`).expect(404);
+    await as(S.adminB).del(`/admin/trips/${trips[1].trip.id}`).expect(404); // other company
+  });
+});
+
 describe('editing and deleting records', () => {
   it('deletes records without history and archives those with trips', async () => {
     const a = as(S.adminA);

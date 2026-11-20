@@ -82,7 +82,7 @@ function DashboardBody() {
 
       <div className="panel flush">
         <div className="toolbar"><b>Today’s trips</b></div>
-        <div style={{ padding: '0 8px' }}><TripTable rows={trips.data ?? []} /></div>
+        <div style={{ padding: '0 8px' }}><TripTable rows={trips.data ?? []} onChanged={() => { trips.reload(); dash.reload(); }} /></div>
       </div>
     </>
   );

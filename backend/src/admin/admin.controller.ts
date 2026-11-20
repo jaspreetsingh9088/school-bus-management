@@ -166,6 +166,9 @@ export class AdminController {
   @Get('trips/:id/track') async track(@CurrentUser() u: AuthUser, @Param('id', uuid) id: string) {
     return this.tracking.history(await this.access.getForCompany(id, tenantOf(u)));
   }
+  @Post('trips/:id/cancel') @HttpCode(200)
+  cancelTrip(@CurrentUser() u: AuthUser, @Param('id', uuid) id: string) { return this.tripsService.cancel(id, u); }
+  @Delete('trips/:id') deleteTrip(@CurrentUser() u: AuthUser, @Param('id', uuid) id: string) { return this.tripsService.remove(id, u); }
   @Post('trips/:id/students/:studentId/override') @HttpCode(200)
   override(@CurrentUser() u: AuthUser, @Param('id', uuid) id: string, @Param('studentId', uuid) studentId: string, @Body() dto: OverrideDto) {
     return this.tripsService.overrideStatus(id, studentId, u, dto.toStatus, dto.note);

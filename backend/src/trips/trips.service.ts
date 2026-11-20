@@ -8,7 +8,7 @@ import { CompanySettingsService } from '../common/company-settings.service';
 import { zoned } from '../common/time';
 import { Db, InjectDb } from '../db/db.module';
 import {
-  absences, authorizedAdults, holidays, parents, parentStudents, routes, routeStops, schools, stops,
+  absences, authorizedAdults, holidays, incidents, parents, parentStudents, routes, routeStops, schools, stops,
   studentAssignments, students, studentStatusEvents, trips, tripStopEvents, tripStudents, TripStudentStatus,
 } from '../db/schema';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -389,6 +389,27 @@ export class TripsService {
     const [student] = await this.db.select().from(students).where(eq(students.id, studentId));
     await this.afterStatusChange(trip, student, toStatus, ts.routeStopId);
     return { ...ts, status: toStatus };
+  }
+
+  /** Admin stops a trip (e.g. a test trip, or the bus was replaced). Parents lose live tracking at once. */
+  async cancel(tripId: string, admin: AuthUser) {
+    const trip = await this.access.getForCompany(tripId, admin.companyId);
+    if (trip.status === 'COMPLETED' || trip.status === 'CANCELLED') throw new ConflictException('This trip has already finished');
+    const [updated] = await this.db.update(trips).set({ status: 'CANCELLED', endedAt: new Date() }).where(eq(trips.id, trip.id)).returning();
+    this.emitTripStatus(updated);
+    await this.realtime.closeTrip(trip.id);
+    return updated;
+  }
+
+  /** Admin deletes a trip that isn't running, with its boarding and GPS records. */
+  async remove(tripId: string, admin: AuthUser) {
+    const trip = await this.access.getForCompany(tripId, admin.companyId);
+    if (trip.status === 'IN_PROGRESS') throw new ConflictException('This trip is running. Stop it first, then delete it.');
+    await this.db.transaction(async (tx) => {
+      await tx.update(incidents).set({ tripId: null }).where(eq(incidents.tripId, trip.id));
+      await tx.delete(trips).where(eq(trips.id, trip.id));
+    });
+    return { deleted: true };
   }
 
   /** A parent's new or cancelled absence updates a trip that already exists. */

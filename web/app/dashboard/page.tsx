@@ -12,15 +12,9 @@ export default function Dashboard() {
 function DashboardBody() {
   const dash = useApi('/admin/dashboard', 8000);
   const trips = useApi(`/admin/trips?date=${todayIST()}`, 8000);
-  const [note, setNote] = useState<string | null>(null);
+  const [note] = useState<string | null>(null);
   const d = dash.data;
 
-  async function generate() {
-    const res = await api('/admin/trips/generate', { method: 'POST', body: { date: todayIST() } });
-    setNote(res.created ? `${res.created} trip(s) created for today.` : 'Today’s trips are already created.');
-    trips.reload();
-    dash.reload();
-  }
 
   if (!d) return <><h1>Live view</h1><ErrorNote error={dash.error} />{dash.loading && <p className="muted">Loading…</p>}</>;
   const a = d.alerts;
@@ -44,7 +38,6 @@ function DashboardBody() {
           <h1>Live view</h1>
           <p className="sub">{new Date(d.date).toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' })} · updates by itself</p>
         </div>
-        {d.trips.scheduled === 0 && <button className="primary" onClick={generate}>Create today’s trips</button>}
       </div>
       {note && <div className="alert good">{note}</div>}
 

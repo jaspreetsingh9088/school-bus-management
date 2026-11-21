@@ -150,3 +150,52 @@ a.link-btn { padding: 4px 8px; border-radius: 6px; }
 a.link-btn:hover { background: #eef3fd; text-decoration: none; }
 a.name { color: var(--text); }
 a.name:hover { color: var(--accent); }
+.days { display: flex; gap: 6px; flex-wrap: wrap; }
+.day { padding: 6px 10px; border-radius: 8px; border: 1px solid var(--line); background: #fff; font-weight: 600; font-size: 13px; color: var(--muted); }
+.day.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.bus-marker { animation: pulse 2s ease-in-out infinite; }
+@keyframes pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(242,169,0,.6); } 50% { box-shadow: 0 0 0 12px rgba(242,169,0,0); } }
+.weekbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.wday { display: grid; justify-items: center; gap: 1px; min-width: 70px; padding: 8px 6px; border-radius: 10px; background: #fff; border: 1px solid var(--line); }
+.wday span { font-size: 12px; color: var(--muted); }
+.wday b { font-size: 20px; }
+.wday small { font-size: 11px; color: var(--muted); }
+.wday.today { border-color: var(--accent); }
+.wday.on { background: var(--accent); border-color: var(--accent); }
+.wday.on span, .wday.on b, .wday.on small { color: #fff; }
+.wday.off:not(.on) { background: var(--warn-bg); }
+.toolbar.between { justify-content: space-between; }
+.tile.good .n { color: var(--good); }
+.tile.warn .n { color: var(--warn); }
+.tabs { display: flex; gap: 4px; margin: 4px 0 12px; border-bottom: 1px solid var(--line); }
+.tabs button { border: 0; background: none; border-radius: 0; padding: 10px 14px; color: var(--muted); font-weight: 600; border-bottom: 2px solid transparent; }
+.tabs button.on { color: var(--accent); border-bottom-color: var(--accent); }
+.dropdown { position: relative; }
+.dropdown .menu { display: none; position: absolute; right: 0; top: 100%; background: #fff; border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 10px 30px rgba(0,0,0,.12); padding: 6px; z-index: 50; min-width: 170px; }
+.dropdown:hover .menu, .dropdown:focus-within .menu { display: grid; }
+.dropdown .menu button { border: 0; text-align: left; }
+.dropdown .menu button:hover { background: #f1f4f8; }
+.chart { display: flex; gap: 12px; align-items: flex-end; height: 190px; padding: 6px 4px 0; }
+.chart .bar { flex: 1; border: 0; background: none; padding: 0; display: flex; flex-direction: column; align-items: center; gap: 6px; height: 100%; }
+.chart .col { flex: 1; width: 100%; display: flex; align-items: flex-end; }
+.chart .billed { width: 100%; background: #fde7b0; border-radius: 6px 6px 0 0; display: flex; align-items: flex-end; overflow: hidden; min-height: 2px; transition: height .5s; }
+.chart .got { width: 100%; background: var(--good); transition: height .5s; }
+.chart .bar.on small { color: var(--accent); font-weight: 700; }
+.chart small { font-size: 12px; color: var(--muted); }
+.legend { display: flex; gap: 16px; font-size: 12px; color: var(--muted); margin-top: 10px; }
+.sw { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; }
+.sw.got { background: var(--good); }
+.sw.billed { background: #fde7b0; }
+.ring { --p: 0; width: 160px; height: 160px; margin: 6px auto 10px; border-radius: 50%; display: grid; place-content: center; text-align: center;
+  background: radial-gradient(closest-side, #fff 78%, transparent 79%), conic-gradient(var(--good) calc(var(--p) * 1%), #eef0f3 0); }
+.ring b { font-size: 30px; }
+.ring span { font-size: 12px; color: var(--muted); }
+.profile { display: flex; align-items: center; gap: 16px; margin: 10px 0 16px; flex-wrap: wrap; }
+.profile .avatar { width: 60px; height: 60px; border-radius: 50%; background: var(--brand); color: var(--brand-ink); display: grid; place-items: center; font-size: 26px; font-weight: 700; }
+.mini { background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 10px 16px; display: grid; min-width: 120px; }
+.mini b { font-size: 20px; }
+.mini span { font-size: 12px; color: var(--muted); }
+.mini.bad b { color: var(--bad); }
+dl.facts { display: grid; grid-template-columns: 150px 1fr; gap: 8px 12px; margin: 0; }
+dl.facts dt { color: var(--muted); }
+dl.facts dd { margin: 0; }

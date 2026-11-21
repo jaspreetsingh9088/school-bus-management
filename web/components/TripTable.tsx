@@ -29,7 +29,7 @@ export function TripTable({ rows, onChanged }: { rows: any[]; onChanged?: () => 
     }
   }
 
-  if (!rows.length) return <p className="empty">No trips for this day. Use “Create trips”, or check that each route has a bus and driver.</p>;
+  if (!rows.length) return <p className="empty">No trips on this day. Routes need a bus and a driver, and must run on this weekday.</p>;
   return (
     <>
       {error && <div className="alert bad">{error}</div>}

@@ -99,8 +99,16 @@ function Body() {
 
         <div className="panel">
           <h2>Map</h2>
-          <Map points={r.stops.map((s: any) => ({ id: s.routeStopId, lat: s.lat, lng: s.lng, kind: 'stop' as const, text: String(s.sequence), label: `${s.sequence}. ${s.name} — ${s.scheduledTime}` }))}
-            line={r.stops.map((s: any) => [s.lat, s.lng])} />
+          <Map
+            tall
+            points={[
+              ...r.stops.map((s: any) => ({ id: s.routeStopId, lat: s.lat, lng: s.lng, kind: 'stop' as const, text: String(s.sequence), label: `${s.sequence}. ${s.name} — ${s.scheduledTime}` })),
+              ...(r.school?.lat != null ? [{ id: 'school', lat: r.school.lat, lng: r.school.lng, kind: 'school' as const, label: r.school.name }] : []),
+            ]}
+            path={r.path}
+            line={r.stops.map((s: any) => [s.lat, s.lng])}
+          />
+          <p className="hint">{r.path?.length > 1 ? 'Blue line = the road the bus takes.' : r.stops.length > 1 ? 'Dashed line: the road route could not be worked out, so stops are joined directly.' : 'Add at least two stops to see the route.'}</p>
         </div>
       </div>
 

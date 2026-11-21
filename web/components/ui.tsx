@@ -16,7 +16,7 @@ export function Pill({ status }: { status: string }) {
 
 const NAV: [string, [string, string, string][]][] = [
   ['Today', [['/dashboard/', '◉', 'Live view'], ['/trips/', '⇄', 'Trips']]],
-  ['People', [['/students/', '☺', 'Students'], ['/parents/', '⌂', 'Parents'], ['/staff/', '☰', 'Drivers & staff']]],
+  ['People', [['/students/', '☺', 'Students'], ['/fees/', '₹', 'Fees'], ['/parents/', '⌂', 'Parents'], ['/staff/', '☰', 'Drivers & staff']]],
   ['Setup', [['/routes/', '↝', 'Routes'], ['/stops/', '●', 'Stops'], ['/buses/', '▭', 'Buses'], ['/schools/', '▲', 'Schools']]],
 ];
 
@@ -40,7 +40,7 @@ export function Shell({ children }: { children: ReactNode }) {
           <div key={section} className="navgroup">
             <div className="navlabel">{section}</div>
             {items.map(([href, ico, label]) => (
-              <Link key={href} href={href} className={path?.startsWith(href) || (href === '/routes/' && path?.startsWith('/route-detail')) || (href === '/trips/' && path?.startsWith('/trip/')) ? 'on' : ''}>
+              <Link key={href} href={href} className={path?.startsWith(href) || (href === '/routes/' && path?.startsWith('/route-detail')) || (href === '/trips/' && path?.startsWith('/trip/')) || (href === '/students/' && path?.startsWith('/student/')) ? 'on' : ''}>
                 <span className="ico">{ico}</span>{label}
               </Link>
             ))}

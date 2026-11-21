@@ -3,10 +3,20 @@ import { FormEvent, ReactNode, useEffect, useState } from 'react';
 import { api, useApi } from '@/lib/api';
 import { Map } from './ui';
 
+export const DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+export function daysText(days?: number[] | null) {
+  const d = days ?? [1, 2, 3, 4, 5, 6];
+  if (d.length === 7) return 'Every day';
+  if (d.join() === '1,2,3,4,5,6') return 'Mon–Sat';
+  if (d.join() === '1,2,3,4,5') return 'Mon–Fri';
+  return d.map((n) => DAY_NAMES[n - 1]).join(', ');
+}
+
 export interface Field {
   key: string;
   label: string;
-  type?: 'text' | 'tel' | 'email' | 'number' | 'date' | 'time' | 'password' | 'select' | 'checkbox' | 'location';
+  type?: 'text' | 'tel' | 'email' | 'number' | 'date' | 'time' | 'password' | 'select' | 'checkbox' | 'location' | 'days';
   options?: { value: string; label: string }[];
   required?: boolean;
   placeholder?: string;
@@ -91,6 +101,25 @@ export function RecordForm({ fields, initial, isEdit, onSubmit, onCancel, submit
             </div>
           );
         }
+        if (f.type === 'days') {
+          const chosen: number[] = v[f.key] ?? [1, 2, 3, 4, 5, 6];
+          return (
+            <div key={f.key} className="field">
+              <span className="lbl">{f.label}</span>
+              <div className="days">
+                {DAY_NAMES.map((d, i) => {
+                  const n = i + 1;
+                  const on = chosen.includes(n);
+                  return (
+                    <button type="button" key={d} className={`day${on ? ' on' : ''}`}
+                      onClick={() => set(f.key, on ? chosen.filter((x) => x !== n) : [...chosen, n].sort())}>{d}</button>
+                  );
+                })}
+              </div>
+              {f.hint && <span className="hint">{f.hint}</span>}
+            </div>
+          );
+        }
         if (f.type === 'checkbox') {
           return (
             <label key={f.key} className="check">
@@ -157,6 +186,7 @@ export function CrudPage<T extends Record<string, any>>(props: {
   top?: ReactNode;
   wideForm?: boolean;
   canAdd?: boolean;
+  headerActions?: ReactNode;
 }) {
   const list = useApi(props.listPath);
   const [q, setQ] = useState('');
@@ -204,9 +234,12 @@ export function CrudPage<T extends Record<string, any>>(props: {
           <h1>{props.title}</h1>
           {props.subtitle && <p className="sub">{props.subtitle}</p>}
         </div>
-        {props.canAdd !== false && (
-          <button className="primary" onClick={() => setEditing({ row: null })}>+ Add {props.noun.toLowerCase()}</button>
-        )}
+        <div className="row">
+          {props.headerActions}
+          {props.canAdd !== false && (
+            <button className="primary" onClick={() => setEditing({ row: null })}>+ Add {props.noun.toLowerCase()}</button>
+          )}
+        </div>
       </div>
       {note && <div className={`alert ${note.tone}`} onClick={() => setNote(null)}>{note.text}</div>}
       {list.error && <div className="alert bad">{list.error}</div>}

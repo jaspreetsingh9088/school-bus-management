@@ -67,7 +67,14 @@ function Body() {
       <div className="grid two">
         <div className="panel">
           <h2>Map</h2>
-          <Map points={points} line={(track.data ?? []).map((p: any) => [p.lat, p.lng])} tall />
+          <Map
+            tall
+            points={[...points, ...(s.school?.lat != null ? [{ id: 'school', lat: s.school.lat, lng: s.school.lng, kind: 'school' as const, label: s.school.name }] : [])]}
+            path={s.path}
+            line={s.stops.map((st: any) => [st.lat, st.lng])}
+            trail={(track.data ?? []).map((p: any) => [p.lat, p.lng])}
+          />
+          <p className="hint">Blue = planned road · Yellow = where the bus actually went</p>
         </div>
         <div className="panel">
           <h2>Stops and children</h2>

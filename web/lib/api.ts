@@ -136,6 +136,10 @@ export const STATUS_LABEL: Record<string, string> = {
   COMPLETED: 'Completed',
   CANCELLED: 'Cancelled',
   PENDING_APPROVAL: 'Pending approval',
+  PAID: 'Paid',
+  PARTLY_PAID: 'Partly paid',
+  PENDING: 'Pending',
+  OVERDUE: 'Overdue',
   ACTIVE: 'Active',
   SUSPENDED: 'Suspended',
   INACTIVE: 'Inactive',
@@ -146,4 +150,23 @@ export const STATUS_TONE: Record<string, 'good' | 'warn' | 'bad' | 'info' | 'mut
   BOARDED: 'info', AT_SCHOOL: 'good', HANDED_OVER: 'good', DROPPED_ALONE: 'good', ABSENT: 'muted', SCHEDULED: 'muted',
   NO_SHOW: 'warn', HELD: 'bad', RETURNED: 'bad', IN_PROGRESS: 'info', COMPLETED: 'good', ACTIVE: 'good',
   PENDING_APPROVAL: 'warn', SUSPENDED: 'warn', INACTIVE: 'muted', MAINTENANCE: 'warn',
+  PAID: 'good', PARTLY_PAID: 'info', PENDING: 'warn', OVERDUE: 'bad',
 };
+
+/** Downloads a CSV from the API (needs the login token, so it can't be a plain link). */
+export async function downloadCsv(path: string, filename: string) {
+  const token = getToken();
+  const res = await fetch(`${API_URL}/api/v1${path}`, { headers: token ? { authorization: `Bearer ${token}` } : {} });
+  if (!res.ok) throw new ApiError(res.status, `Download failed (${res.status})`);
+  const blob = new Blob(['\uFEFF', await res.text()], { type: 'text/csv;charset=utf-8' }); // BOM so Excel shows ₹ correctly
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+export const inr = (n: number) => `₹${Math.round(n).toLocaleString('en-IN')}`;

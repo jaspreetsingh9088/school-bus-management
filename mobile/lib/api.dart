@@ -104,4 +104,9 @@ const statusLabel = <String, String>{
   'COMPLETED': 'Completed',
   'PENDING_APPROVAL': 'Waiting for approval',
   'ACTIVE': 'Active',
+  'PAID': 'Paid',
+  'PARTLY_PAID': 'Part paid',
+  'PENDING': 'Due',
+  'OVERDUE': 'Overdue',
+  'CANCELLED': 'Cancelled',
 };

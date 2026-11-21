@@ -1,4 +1,7 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
+import 'package:flutter_animate/flutter_animate.dart';
 
 import 'api.dart';
 import 'main.dart';
@@ -117,73 +120,199 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: SafeArea(
-        child: ListView(
-          padding: const EdgeInsets.all(24),
-          children: [
-            const SizedBox(height: 24),
-            Center(
-              child: Container(
-                width: 84,
-                height: 84,
-                decoration: BoxDecoration(color: brand, borderRadius: BorderRadius.circular(22)),
-                child: const Center(child: Text('🚌', style: TextStyle(fontSize: 44))),
-              ),
+      backgroundColor: navy,
+      body: SingleChildScrollView(
+        child: Column(children: [
+          // Animated header: a bus driving along the road.
+          Container(
+            height: 300,
+            width: double.infinity,
+            decoration: const BoxDecoration(gradient: headerGradient),
+            child: SafeArea(
+              child: Column(children: [
+                const SizedBox(height: 18),
+                ClipRRect(borderRadius: BorderRadius.circular(20), child: Image.asset('assets/icon.png', width: 72, height: 72))
+                    .animate()
+                    .scale(begin: const Offset(0.6, 0.6), end: const Offset(1, 1), duration: 500.ms, curve: Curves.easeOutBack),
+                const SizedBox(height: 12),
+                const Text('School Bus', style: TextStyle(color: Colors.white, fontSize: 26, fontWeight: FontWeight.w800))
+                    .animate()
+                    .fadeIn(delay: 150.ms),
+                Text('Know where the bus is. Always.', style: TextStyle(color: Colors.white.withValues(alpha: 0.75)))
+                    .animate()
+                    .fadeIn(delay: 300.ms),
+                const Spacer(),
+                const SizedBox(height: 70, child: _RoadScene()),
+              ]),
             ),
-            const SizedBox(height: 16),
-            Text('School Bus', textAlign: TextAlign.center, style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold)),
-            const Text('For parents, drivers and attendants', textAlign: TextAlign.center),
-            const SizedBox(height: 28),
-            if (widget.message != null) ...[
-              Text(widget.message!, style: TextStyle(color: Colors.red.shade700)),
-              const SizedBox(height: 12),
-            ],
-            if (_step == _Step.phone) ...[
-              TextField(
-                controller: _phone,
-                keyboardType: TextInputType.phone,
-                decoration: const InputDecoration(labelText: 'Mobile number', prefixText: '+91 ', border: OutlineInputBorder()),
-              ),
-              const SizedBox(height: 16),
-              FilledButton(onPressed: _busy ? null : _sendCode, child: const Text('Send code')),
-            ],
-            if (_step == _Step.code) ...[
-              Text('Enter the 6-digit code sent to ${_phone.text}'),
-              const SizedBox(height: 12),
-              if (_demoCode != null)
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  margin: const EdgeInsets.only(bottom: 12),
-                  decoration: BoxDecoration(color: const Color(0xFFFFF4D6), borderRadius: BorderRadius.circular(8)),
-                  child: Text('Demo mode: the code $_demoCode is filled in for you. Just tap Log in.'),
-                ),
-              TextField(
-                controller: _code,
-                keyboardType: TextInputType.number,
-                maxLength: 6,
-                decoration: const InputDecoration(labelText: 'Code', border: OutlineInputBorder()),
-              ),
-              const SizedBox(height: 8),
-              FilledButton(onPressed: _busy ? null : () => _verify(), child: const Text('Log in')),
-              TextButton(onPressed: _busy ? null : () => setState(() => _step = _Step.phone), child: const Text('Change number')),
-            ],
-            if (_step == _Step.register) ...[
-              const Text('This number isn’t registered yet. Parents can sign up with the code from their bus company.'),
-              const SizedBox(height: 12),
-              TextField(controller: _name, decoration: const InputDecoration(labelText: 'Your name', border: OutlineInputBorder())),
-              const SizedBox(height: 12),
-              TextField(
-                controller: _company,
-                decoration: const InputDecoration(labelText: 'Bus company code (e.g. demo-transport)', border: OutlineInputBorder()),
-              ),
-              const SizedBox(height: 16),
-              FilledButton(onPressed: _busy ? null : _register, child: const Text('Sign up as a parent')),
-              TextButton(onPressed: () => setState(() => _step = _Step.phone), child: const Text('Back')),
-            ],
-            if (_busy) const Padding(padding: EdgeInsets.all(16), child: Center(child: CircularProgressIndicator())),
-          ],
+          ),
+          // Form card
+          Container(
+            constraints: BoxConstraints(minHeight: MediaQuery.of(context).size.height - 300),
+            decoration: const BoxDecoration(color: Colors.white, borderRadius: BorderRadius.vertical(top: Radius.circular(28))),
+            padding: const EdgeInsets.fromLTRB(24, 28, 24, 24),
+            child: AnimatedSwitcher(
+              duration: const Duration(milliseconds: 350),
+              transitionBuilder: (child, a) => FadeTransition(opacity: a, child: SlideTransition(position: Tween(begin: const Offset(0.08, 0), end: Offset.zero).animate(a), child: child)),
+              child: KeyedSubtree(key: ValueKey(_step), child: _form()),
+            ),
+          ).animate().slideY(begin: 0.15, end: 0, duration: 500.ms, curve: Curves.easeOutCubic),
+        ]),
+      ),
+    );
+  }
+
+  Widget _form() {
+    final title = switch (_step) {
+      _Step.phone => 'Log in with your mobile',
+      _Step.code => 'Enter the code',
+      _Step.register => 'Create your parent account',
+    };
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      Text(title, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800, color: ink)),
+      const SizedBox(height: 6),
+      if (widget.message != null) ...[
+        Text(widget.message!, style: TextStyle(color: Colors.red.shade700)),
+        const SizedBox(height: 8),
+      ],
+      if (_step == _Step.phone) ...[
+        Text('Parents, drivers and attendants use the same app.', style: TextStyle(color: Colors.grey.shade600)),
+        const SizedBox(height: 22),
+        TextField(
+          controller: _phone,
+          keyboardType: TextInputType.phone,
+          style: const TextStyle(fontSize: 18, letterSpacing: 1),
+          decoration: const InputDecoration(labelText: 'Mobile number', prefixText: '+91  ', prefixIcon: Icon(Icons.phone_iphone)),
+        ),
+        const SizedBox(height: 18),
+        FilledButton(
+          style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(54)),
+          onPressed: _busy ? null : _sendCode,
+          child: _busy ? const _Dots() : const Text('Send code', style: TextStyle(fontSize: 17)),
+        ),
+      ],
+      if (_step == _Step.code) ...[
+        Text('We sent a 6-digit code to +91 ${_phone.text}', style: TextStyle(color: Colors.grey.shade600)),
+        const SizedBox(height: 18),
+        if (_demoCode != null)
+          Container(
+            padding: const EdgeInsets.all(12),
+            margin: const EdgeInsets.only(bottom: 14),
+            decoration: BoxDecoration(color: const Color(0xFFFFF4D6), borderRadius: BorderRadius.circular(12)),
+            child: Row(children: [
+              const Icon(Icons.auto_awesome, color: amber, size: 20),
+              const SizedBox(width: 8),
+              Expanded(child: Text('Demo mode: code $_demoCode is filled in. Just tap Log in.')),
+            ]),
+          ).animate().fadeIn().shake(hz: 2, offset: const Offset(2, 0), duration: 500.ms),
+        TextField(
+          controller: _code,
+          keyboardType: TextInputType.number,
+          maxLength: 6,
+          textAlign: TextAlign.center,
+          style: const TextStyle(fontSize: 26, letterSpacing: 12, fontWeight: FontWeight.w700),
+          decoration: const InputDecoration(counterText: '', hintText: '••••••'),
+        ),
+        const SizedBox(height: 18),
+        FilledButton(
+          style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(54)),
+          onPressed: _busy ? null : () => _verify(),
+          child: _busy ? const _Dots() : const Text('Log in', style: TextStyle(fontSize: 17)),
+        ),
+        TextButton(onPressed: _busy ? null : () => setState(() => _step = _Step.phone), child: const Text('Change number')),
+      ],
+      if (_step == _Step.register) ...[
+        Text('This number isn’t registered yet. Parents can sign up with their bus company’s code.', style: TextStyle(color: Colors.grey.shade600)),
+        const SizedBox(height: 18),
+        TextField(controller: _name, decoration: const InputDecoration(labelText: 'Your name', prefixIcon: Icon(Icons.person_outline))),
+        const SizedBox(height: 12),
+        TextField(controller: _company, decoration: const InputDecoration(labelText: 'Bus company code', hintText: 'e.g. demo-transport', prefixIcon: Icon(Icons.business_outlined))),
+        const SizedBox(height: 18),
+        FilledButton(
+          style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(54)),
+          onPressed: _busy ? null : _register,
+          child: _busy ? const _Dots() : const Text('Sign up as a parent', style: TextStyle(fontSize: 17)),
+        ),
+        TextButton(onPressed: () => setState(() => _step = _Step.phone), child: const Text('Back')),
+      ],
+    ]);
+  }
+}
+
+/// Three bouncing dots for "working…".
+class _Dots extends StatelessWidget {
+  const _Dots();
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(mainAxisSize: MainAxisSize.min, children: [
+      for (var i = 0; i < 3; i++)
+        Container(
+          width: 8,
+          height: 8,
+          margin: const EdgeInsets.symmetric(horizontal: 3),
+          decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle),
+        ).animate(onPlay: (c) => c.repeat(reverse: true), delay: (120 * i).ms).moveY(begin: 3, end: -3, duration: 350.ms),
+    ]);
+  }
+}
+
+/// A road with moving lane marks and a bobbing bus.
+class _RoadScene extends StatefulWidget {
+  const _RoadScene();
+
+  @override
+  State<_RoadScene> createState() => _RoadSceneState();
+}
+
+class _RoadSceneState extends State<_RoadScene> with SingleTickerProviderStateMixin {
+  late final AnimationController _c = AnimationController(vsync: this, duration: const Duration(seconds: 2))..repeat();
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _c,
+      builder: (_, __) => CustomPaint(
+        painter: _RoadPainter(_c.value),
+        child: Align(
+          alignment: const Alignment(-0.15, -0.35),
+          child: Transform.translate(
+            offset: Offset(0, math.sin(_c.value * math.pi * 4) * 1.5),
+            child: const Text('🚌', style: TextStyle(fontSize: 40)),
+          ),
         ),
       ),
     );
   }
+}
+
+class _RoadPainter extends CustomPainter {
+  _RoadPainter(this.t);
+  final double t;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final road = Paint()..color = const Color(0xFF0E141B);
+    canvas.drawRect(Rect.fromLTWH(0, size.height - 26, size.width, 26), road);
+    final mark = Paint()..color = brand;
+    const dash = 26.0, gap = 22.0;
+    final shift = t * (dash + gap);
+    for (double x = -dash - shift; x < size.width; x += dash + gap) {
+      canvas.drawRRect(RRect.fromRectAndRadius(Rect.fromLTWH(x, size.height - 15, dash, 4), const Radius.circular(2)), mark);
+    }
+    // passing roadside dots
+    final dot = Paint()..color = Colors.white.withValues(alpha: 0.25);
+    for (double x = -(t * 120); x < size.width; x += 120) {
+      canvas.drawCircle(Offset(x + 40, size.height - 36), 3, dot);
+    }
+  }
+
+  @override
+  bool shouldRepaint(_RoadPainter old) => old.t != t;
 }

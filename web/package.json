@@ -1,11 +1,11 @@
 {
   "name": "schoolbus-admin",
   "version": "1.0.0",
-  "description": "School Bus Management — admin panel",
+  "description": "School Bus Management \u2014 admin panel",
   "scripts": {
-    "dev": "next dev -p 3001",
-    "build": "next build",
-    "start": "next start"
+    "dev": "node init && next dev -p 3001",
+    "build": "node init && next build",
+    "start": "node init && next start"
   },
   "dependencies": {
     "leaflet": "1.9",

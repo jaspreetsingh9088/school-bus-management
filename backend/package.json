@@ -3,9 +3,9 @@
   "version": "1.0.0",
   "description": "School Bus Management System \u2014 backend API",
   "scripts": {
-    "build": "tsc -p tsconfig.json",
-    "start": "node dist/main.js",
-    "dev": "ts-node src/main.ts",
+    "build": "node init && tsc -p tsconfig.json",
+    "start": "node init && node dist/main.js",
+    "dev": "node init && ts-node src/main.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "ts-node src/db/migrate.ts",
     "db:seed": "ts-node src/db/seed.ts",

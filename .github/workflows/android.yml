@@ -41,6 +41,8 @@ jobs:
           python3 tool/patch_android.py
           rm -rf test  # sample test created by flutter create
       - run: flutter pub get
+      - name: App icon
+        run: dart run flutter_launcher_icons
       - run: flutter analyze --no-fatal-infos --no-fatal-warnings
       - name: Build release APK
         run: |

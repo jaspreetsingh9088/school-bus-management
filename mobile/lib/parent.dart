@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 
@@ -9,68 +10,15 @@ import 'main.dart';
 
 const consentVersion = '2026-11';
 
-/// Parent home: each child, today's trips, live tracking, absences and alerts.
-class ParentHome extends StatelessWidget {
+/// Parent home: a card per child with a clear status, live tracking and fee.
+class ParentHome extends StatefulWidget {
   const ParentHome({super.key});
 
   @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('My children'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.notifications_none),
-            tooltip: 'Alerts',
-            onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => Scaffold(appBar: AppBar(title: const Text('Alerts')), body: const _Alerts()))),
-          ),
-          PopupMenuButton<String>(
-            onSelected: (v) {
-              if (v == 'sos') _sos(context);
-              if (v == 'logout') logoutAndRestart(context);
-            },
-            itemBuilder: (_) => const [
-              PopupMenuItem(value: 'sos', child: ListTile(leading: Icon(Icons.sos, color: Colors.red), title: Text('Emergency (SOS)'))),
-              PopupMenuItem(value: 'logout', child: ListTile(leading: Icon(Icons.logout), title: Text('Log out'))),
-            ],
-          ),
-        ],
-      ),
-      body: const _Children(),
-    );
-  }
+  State<ParentHome> createState() => _ParentHomeState();
 }
 
-Future<void> _sos(BuildContext context) async {
-  final note = TextEditingController();
-  final ok = await showDialog<bool>(
-    context: context,
-    builder: (ctx) => AlertDialog(
-      title: const Text('Send an emergency alert?'),
-      content: TextField(controller: note, decoration: const InputDecoration(hintText: 'What happened? (optional)')),
-      actions: [
-        TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-        FilledButton(style: FilledButton.styleFrom(backgroundColor: Colors.red), onPressed: () => Navigator.pop(ctx, true), child: const Text('Send SOS')),
-      ],
-    ),
-  );
-  if (ok != true) return;
-  try {
-    await Api.instance.post('/parent/sos', {'type': 'SOS', if (note.text.trim().isNotEmpty) 'note': note.text.trim()});
-    if (context.mounted) showInfo(context, 'The transport office has been alerted.');
-  } catch (e) {
-    if (context.mounted) showError(context, e);
-  }
-}
-
-class _Children extends StatefulWidget {
-  const _Children();
-
-  @override
-  State<_Children> createState() => _ChildrenState();
-}
-
-class _ChildrenState extends State<_Children> {
+class _ParentHomeState extends State<ParentHome> {
   bool _loading = true;
   bool _consent = true;
   List<Map<String, dynamic>> _kids = [];
@@ -122,24 +70,34 @@ class _ChildrenState extends State<_Children> {
 
   Future<void> _link() async {
     final code = TextEditingController();
-    final ok = await showDialog<bool>(
+    final ok = await showModalBottomSheet<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Add your child'),
-        content: Column(mainAxisSize: MainAxisSize.min, children: [
-          const Text('Enter the 8-letter code from the transport office.'),
-          TextField(controller: code, textCapitalization: TextCapitalization.characters, decoration: const InputDecoration(labelText: 'Code')),
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      builder: (ctx) => Padding(
+        padding: EdgeInsets.fromLTRB(24, 24, 24, MediaQuery.of(ctx).viewInsets.bottom + 24),
+        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          const Text('Add your child', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
+          const SizedBox(height: 6),
+          Text('Enter the 8-letter code from the transport office.', style: TextStyle(color: Colors.grey.shade600)),
+          const SizedBox(height: 16),
+          TextField(
+            controller: code,
+            autofocus: true,
+            textCapitalization: TextCapitalization.characters,
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 22, letterSpacing: 6, fontWeight: FontWeight.w700),
+            decoration: const InputDecoration(hintText: 'ABCD2345'),
+          ),
+          const SizedBox(height: 16),
+          FilledButton(style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(52)), onPressed: () => Navigator.pop(ctx, true), child: const Text('Add child')),
         ]),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Add')),
-        ],
       ),
     );
     if (ok != true) return;
     try {
       final res = await Api.instance.post('/parent/children/link', {'activationCode': code.text.trim()});
-      if (mounted) showInfo(context, '${res['name']} added.');
+      if (mounted) showInfo(context, '${res['name']} added');
       await _load();
     } catch (e) {
       if (mounted) showError(context, e);
@@ -148,59 +106,138 @@ class _ChildrenState extends State<_Children> {
 
   @override
   Widget build(BuildContext context) {
-    if (_loading) return const Center(child: CircularProgressIndicator());
-    if (!_consent) {
-      return ListView(padding: const EdgeInsets.all(24), children: [
-        Text('Privacy notice', style: Theme.of(context).textTheme.titleLarge),
-        const SizedBox(height: 12),
-        const Text(
-          'To keep your child safe, the transport company stores your child’s name, school, class, photo, '
-          'pickup point and trip records, and shows you the bus location only while your child’s trip is running. '
-          'You can ask to see, correct or delete this information at any time by contacting the transport office.',
-        ),
-        const SizedBox(height: 20),
-        FilledButton(onPressed: _giveConsent, child: const Text('I agree')),
-      ]);
-    }
-    return RefreshIndicator(
-      onRefresh: _load,
-      child: ListView(
-        padding: const EdgeInsets.all(12),
-        children: [
-          if (_kids.isEmpty)
-            const Padding(padding: EdgeInsets.all(24), child: Text('No children yet. Tap “Add child” and enter the code from the transport office.')),
-          for (final k in _kids) _ChildCard(child: k, trips: _today[k['studentId']] ?? const [], onChanged: _load),
-          const SizedBox(height: 12),
-          OutlinedButton.icon(style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(48)), onPressed: _link, icon: const Icon(Icons.add), label: const Text('Add a child with a code')),
-        ],
+    final name = Api.instance.session?.name.split(' ').first ?? '';
+    return Scaffold(
+      body: RefreshIndicator(
+        onRefresh: _load,
+        child: ListView(padding: EdgeInsets.zero, children: [
+          GradientHeader(
+            title: '${greeting()}, $name',
+            subtitle: _kids.isEmpty ? 'Welcome to School Bus' : 'Here’s how your ${_kids.length == 1 ? 'child is' : 'children are'} doing',
+            trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+              IconButton(
+                icon: const Icon(Icons.notifications_none, color: Colors.white),
+                tooltip: 'Alerts',
+                onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AlertsScreen())),
+              ),
+              PopupMenuButton<String>(
+                icon: const Icon(Icons.more_vert, color: Colors.white),
+                onSelected: (v) {
+                  if (v == 'add') _link();
+                  if (v == 'sos') _sos(context);
+                  if (v == 'logout') logoutAndRestart(context);
+                },
+                itemBuilder: (_) => const [
+                  PopupMenuItem(value: 'add', child: ListTile(leading: Icon(Icons.person_add_alt), title: Text('Add a child'))),
+                  PopupMenuItem(value: 'sos', child: ListTile(leading: Icon(Icons.sos, color: Colors.red), title: Text('Emergency (SOS)'))),
+                  PopupMenuItem(value: 'logout', child: ListTile(leading: Icon(Icons.logout), title: Text('Log out'))),
+                ],
+              ),
+            ]),
+          ),
+          Padding(padding: const EdgeInsets.fromLTRB(16, 16, 16, 24), child: _body()),
+        ]),
       ),
+    );
+  }
+
+  Widget _body() {
+    if (_loading) {
+      return const Padding(padding: EdgeInsets.all(48), child: Center(child: CircularProgressIndicator()));
+    }
+    if (!_consent) {
+      return _Panel(children: [
+        const Icon(Icons.privacy_tip_outlined, size: 44, color: blue),
+        const SizedBox(height: 12),
+        const Text('Your child’s privacy', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
+        const SizedBox(height: 10),
+        const Text(
+          'To keep your child safe, the transport company stores your child’s name, school, class, photo, pickup point and trip '
+          'records, and shows you the bus location only while your child’s trip is running. You can ask to see, correct or delete '
+          'this information at any time by contacting the transport office.',
+        ),
+        const SizedBox(height: 18),
+        FilledButton(style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(52)), onPressed: _giveConsent, child: const Text('I agree')),
+      ]).enter(0);
+    }
+    if (_kids.isEmpty) {
+      return _Panel(children: [
+        const Text('🧒', style: TextStyle(fontSize: 56)).animate(onPlay: (c) => c.repeat(reverse: true)).moveY(begin: -4, end: 4, duration: 1200.ms),
+        const SizedBox(height: 10),
+        const Text('Add your child', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
+        const SizedBox(height: 6),
+        Text('Ask the transport office for your child’s 8-letter code.', textAlign: TextAlign.center, style: TextStyle(color: Colors.grey.shade600)),
+        const SizedBox(height: 18),
+        FilledButton.icon(style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(52)), onPressed: _link, icon: const Icon(Icons.add), label: const Text('Add with a code')),
+      ]).enter(0);
+    }
+    return Column(children: [
+      for (var i = 0; i < _kids.length; i++)
+        _ChildCard(child: _kids[i], trips: _today[_kids[i]['studentId']] ?? const [], onChanged: _load).enter(i),
+    ]);
+  }
+}
+
+class _Panel extends StatelessWidget {
+  const _Panel({required this.children});
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(24)),
+      child: Column(children: children),
     );
   }
 }
 
-/// Plain-language status for a child's trip.
-String childStatusText(String status, String direction, String name) {
+Future<void> _sos(BuildContext context) async {
+  final note = TextEditingController();
+  final ok = await showDialog<bool>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      icon: const Icon(Icons.sos, color: Colors.red, size: 40),
+      title: const Text('Send an emergency alert?'),
+      content: TextField(controller: note, decoration: const InputDecoration(hintText: 'What happened? (optional)')),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+        FilledButton(style: FilledButton.styleFrom(backgroundColor: Colors.red), onPressed: () => Navigator.pop(ctx, true), child: const Text('Send SOS')),
+      ],
+    ),
+  );
+  if (ok != true) return;
+  try {
+    await Api.instance.post('/parent/sos', {'type': 'SOS', if (note.text.trim().isNotEmpty) 'note': note.text.trim()});
+    if (context.mounted) showInfo(context, 'The transport office has been alerted.');
+  } catch (e) {
+    if (context.mounted) showError(context, e);
+  }
+}
+
+/// Plain-language status for a child's trip, with an emoji.
+(String, String) childStatus(String status, String direction, String name) {
   final morning = direction == 'MORNING';
   switch (status) {
     case 'SCHEDULED':
-      return morning ? 'Bus is on the way to pick up $name' : '$name is waiting for the bus at school';
+      return morning ? ('🚌', 'Bus is on the way to pick up $name') : ('🏫', '$name is waiting for the bus at school');
     case 'BOARDED':
-      return morning ? '$name is on the bus to school' : '$name is on the bus home';
+      return morning ? ('🚌', '$name is on the bus to school') : ('🚌', '$name is on the bus home');
     case 'AT_SCHOOL':
-      return '$name reached school ✓';
+      return ('🏫', '$name reached school safely');
     case 'HANDED_OVER':
     case 'DROPPED_ALONE':
-      return '$name was dropped home ✓';
+      return ('🏠', '$name was dropped home safely');
     case 'ABSENT':
-      return 'Marked absent — no pickup';
+      return ('📅', 'Marked absent — no pickup');
     case 'NO_SHOW':
-      return morning ? '$name was not at the stop' : '$name did not come to the bus';
+      return ('⚠️', morning ? '$name was not at the stop' : '$name did not come to the bus');
     case 'HELD':
-      return '$name is safe on the bus. Please call the office';
+      return ('🛑', '$name is safe on the bus. Please call the office');
     case 'RETURNED':
-      return '$name is being taken back to school';
+      return ('🛑', '$name is being taken back to school');
     default:
-      return statusLabel[status] ?? status;
+      return ('ℹ️', statusLabel[status] ?? status);
   }
 }
 
@@ -215,64 +252,88 @@ class _ChildCard extends StatelessWidget {
     final name = (child['name'] as String).split(' ').first;
     final morning = child['morning'] as Map?;
     final afternoon = child['afternoon'] as Map?;
+    final fee = child['fee'] as Map?;
     final running = trips.cast<Map>().where((t) => t['canTrack'] == true).toList();
     final latest = running.isNotEmpty ? running.first : (trips.isNotEmpty ? trips.cast<Map>().last : null);
     final pending = child['status'] == 'PENDING_APPROVAL';
+    final (emoji, text) = pending
+        ? ('⏳', 'Waiting for the transport office to approve')
+        : latest != null
+            ? childStatus(latest['studentStatus'] as String, latest['direction'] as String, name)
+            : ('😴', 'No bus trip right now');
+    final Color color = pending ? amber : (latest != null ? statusColor(latest['studentStatus'] as String) : Colors.grey.shade600);
 
-    return Card(
-      margin: const EdgeInsets.only(bottom: 14),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Row(children: [
-            CircleAvatar(radius: 22, backgroundColor: brand, child: Text(name.substring(0, 1), style: const TextStyle(fontSize: 18, color: ink))),
-            const SizedBox(width: 12),
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(24),
+        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 16, offset: const Offset(0, 6))],
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(18, 18, 18, 0),
+          child: Row(children: [
+            CircleAvatar(
+              radius: 26,
+              backgroundColor: brand,
+              child: Text(name.substring(0, 1), style: const TextStyle(fontSize: 22, color: ink, fontWeight: FontWeight.w800)),
+            ),
+            const SizedBox(width: 14),
             Expanded(
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(child['name'] as String, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 17)),
-                Text('${child['school']}', style: TextStyle(fontSize: 13, color: Colors.grey.shade700)),
+                Text(child['name'] as String, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 18)),
+                Text('${child['school']}${child['className'] != null ? ' · Class ${child['className']}' : ''}', style: TextStyle(fontSize: 13, color: Colors.grey.shade600)),
               ]),
             ),
+            if (running.isNotEmpty) const LiveBadge(),
           ]),
-          const SizedBox(height: 14),
-          if (pending)
-            const _StatusBox(text: 'Waiting for the transport office to approve', color: Color(0xFF9A6700))
-          else if (latest != null)
-            _StatusBox(
-              text: childStatusText(latest['studentStatus'] as String, latest['direction'] as String, name),
-              color: statusColor(latest['studentStatus'] as String),
-            )
-          else
-            const _StatusBox(text: 'No bus trip right now', color: Colors.grey),
-          if (running.isNotEmpty) ...[
-            const SizedBox(height: 12),
-            SizedBox(
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(18, 16, 18, 0),
+          child: AnimatedSwitcher(
+            duration: const Duration(milliseconds: 400),
+            child: Container(
+              key: ValueKey(text),
               width: double.infinity,
-              child: FilledButton.icon(
-                style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(50)),
-                icon: const Icon(Icons.directions_bus),
-                label: const Text('See the bus on the map', style: TextStyle(fontSize: 16)),
-                onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => TrackScreen(tripId: running.first['tripId'] as String))),
-              ),
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(color: color.withValues(alpha: 0.09), borderRadius: BorderRadius.circular(16)),
+              child: Row(children: [
+                Text(emoji, style: const TextStyle(fontSize: 26)),
+                const SizedBox(width: 12),
+                Expanded(child: Text(text, style: TextStyle(color: color, fontWeight: FontWeight.w700, fontSize: 15.5))),
+              ]),
             ),
-          ],
-          if (morning != null || afternoon != null) ...[
-            const SizedBox(height: 12),
-            Text(
-              [
-                if (morning != null) 'Pickup ${morning['time']} · ${morning['stopName']}',
-                if (afternoon != null) 'Drop ${afternoon['time']}',
-              ].join('   •   '),
-              style: TextStyle(fontSize: 13, color: Colors.grey.shade700),
-            ),
-          ],
-          if (!pending)
-            Align(
-              alignment: Alignment.centerRight,
+          ),
+        ),
+        if (running.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(18, 12, 18, 0),
+            child: FilledButton.icon(
+              style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(54), backgroundColor: blue),
+              icon: const Icon(Icons.map_rounded),
+              label: const Text('Watch the bus live', style: TextStyle(fontSize: 16.5)),
+              onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => TrackScreen(tripId: running.first['tripId'] as String))),
+            ).animate(onPlay: (c) => c.repeat()).shimmer(delay: 1500.ms, duration: 1200.ms, color: Colors.white30),
+          ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(18, 14, 18, 4),
+          child: Wrap(spacing: 8, runSpacing: 8, children: [
+            if (morning != null) _Info(icon: Icons.wb_sunny_outlined, text: 'Pickup ${morning['time']}'),
+            if (afternoon != null) _Info(icon: Icons.home_outlined, text: 'Drop ${afternoon['time']}'),
+            if (morning != null && morning['busNumber'] != null) _Info(icon: Icons.directions_bus_outlined, text: '${morning['busNumber']}'),
+            if (fee != null) _FeeChip(fee: fee),
+          ]),
+        ),
+        if (!pending)
+          Align(
+            alignment: Alignment.centerRight,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(8, 0, 8, 6),
               child: TextButton.icon(icon: const Icon(Icons.event_busy, size: 18), label: const Text('Won’t need the bus'), onPressed: () => _absent(context)),
             ),
-        ]),
-      ),
+          ),
+      ]),
     );
   }
 
@@ -280,13 +341,15 @@ class _ChildCard extends StatelessWidget {
     final now = DateTime.now();
     final choice = await showModalBottomSheet<String>(
       context: context,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
       builder: (ctx) => SafeArea(
         child: Column(mainAxisSize: MainAxisSize.min, children: [
-          const ListTile(title: Text('When won’t your child need the bus?', style: TextStyle(fontWeight: FontWeight.bold))),
-          ListTile(leading: const Icon(Icons.today), title: const Text('Today (whole day)'), onTap: () => Navigator.pop(ctx, 'today')),
-          ListTile(leading: const Icon(Icons.wb_twilight), title: const Text('Today, afternoon only'), onTap: () => Navigator.pop(ctx, 'today-pm')),
-          ListTile(leading: const Icon(Icons.event), title: const Text('Tomorrow (whole day)'), onTap: () => Navigator.pop(ctx, 'tomorrow')),
-          ListTile(leading: const Icon(Icons.calendar_month), title: const Text('Choose a date…'), onTap: () => Navigator.pop(ctx, 'pick')),
+          const Padding(padding: EdgeInsets.all(18), child: Text('When won’t your child need the bus?', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 17))),
+          ListTile(leading: const Text('📅', style: TextStyle(fontSize: 22)), title: const Text('Today (whole day)'), onTap: () => Navigator.pop(ctx, 'today')),
+          ListTile(leading: const Text('🌇', style: TextStyle(fontSize: 22)), title: const Text('Today, afternoon only'), onTap: () => Navigator.pop(ctx, 'today-pm')),
+          ListTile(leading: const Text('🗓️', style: TextStyle(fontSize: 22)), title: const Text('Tomorrow (whole day)'), onTap: () => Navigator.pop(ctx, 'tomorrow')),
+          ListTile(leading: const Text('📆', style: TextStyle(fontSize: 22)), title: const Text('Choose a date…'), onTap: () => Navigator.pop(ctx, 'pick')),
+          const SizedBox(height: 8),
         ]),
       ),
     );
@@ -314,30 +377,55 @@ class _ChildCard extends StatelessWidget {
   }
 }
 
-class _StatusBox extends StatelessWidget {
-  const _StatusBox({required this.text, required this.color});
+class _Info extends StatelessWidget {
+  const _Info({required this.icon, required this.text});
+  final IconData icon;
   final String text;
-  final Color color;
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-      decoration: BoxDecoration(color: color.withValues(alpha: 0.10), borderRadius: BorderRadius.circular(10)),
-      child: Text(text, style: TextStyle(color: color, fontWeight: FontWeight.w600, fontSize: 15)),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(color: const Color(0xFFF3F5F8), borderRadius: BorderRadius.circular(12)),
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        Icon(icon, size: 16, color: Colors.grey.shade700),
+        const SizedBox(width: 5),
+        Text(text, style: TextStyle(fontSize: 13, color: Colors.grey.shade800, fontWeight: FontWeight.w600)),
+      ]),
     );
   }
 }
 
-class _Alerts extends StatefulWidget {
-  const _Alerts();
+class _FeeChip extends StatelessWidget {
+  const _FeeChip({required this.fee});
+  final Map fee;
 
   @override
-  State<_Alerts> createState() => _AlertsState();
+  Widget build(BuildContext context) {
+    final status = fee['status'] as String;
+    final c = statusColor(status);
+    final due = (fee['dueRupees'] as num).round();
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(color: c.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(12)),
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        Icon(status == 'PAID' ? Icons.check_circle : Icons.currency_rupee, size: 16, color: c),
+        const SizedBox(width: 4),
+        Text(status == 'PAID' ? 'Fee paid' : '₹$due fee ${status == 'OVERDUE' ? 'overdue' : 'due'}', style: TextStyle(fontSize: 13, color: c, fontWeight: FontWeight.w700)),
+      ]),
+    );
+  }
 }
 
-class _AlertsState extends State<_Alerts> {
+/// Alerts list.
+class AlertsScreen extends StatefulWidget {
+  const AlertsScreen({super.key});
+
+  @override
+  State<AlertsScreen> createState() => _AlertsScreenState();
+}
+
+class _AlertsScreenState extends State<AlertsScreen> {
   List<dynamic>? _items;
   Timer? _timer;
 
@@ -361,32 +449,61 @@ class _AlertsState extends State<_Alerts> {
     } catch (_) {}
   }
 
+  IconData _icon(String type) {
+    if (type.contains('BOARDED')) return Icons.directions_bus;
+    if (type.contains('SCHOOL')) return Icons.school;
+    if (type.contains('HANDED') || type.contains('DROPPED')) return Icons.home;
+    if (type.contains('APPROACH') || type.contains('ARRIVED')) return Icons.near_me;
+    if (type.contains('HELD') || type.contains('NO_SHOW') || type.contains('RETURNED')) return Icons.warning_amber;
+    return Icons.notifications;
+  }
+
   @override
   Widget build(BuildContext context) {
     final items = _items;
-    if (items == null) return const Center(child: CircularProgressIndicator());
-    if (items.isEmpty) return const Center(child: Text('No alerts yet.'));
-    return RefreshIndicator(
-      onRefresh: _load,
-      child: ListView.separated(
-        itemCount: items.length,
-        separatorBuilder: (_, __) => const Divider(height: 1),
-        itemBuilder: (_, i) {
-          final n = items[i] as Map;
-          final at = DateTime.parse(n['createdAt'] as String).toLocal();
-          return ListTile(
-            leading: Icon(n['safety'] == true ? Icons.shield : Icons.notifications, color: n['safety'] == true ? Colors.blue : Colors.grey),
-            title: Text(n['title'] as String, style: const TextStyle(fontWeight: FontWeight.w600)),
-            subtitle: Text('${n['body']}\n${at.hour.toString().padLeft(2, '0')}:${at.minute.toString().padLeft(2, '0')}, ${at.day}/${at.month}'),
-            isThreeLine: true,
-          );
-        },
-      ),
+    return Scaffold(
+      appBar: AppBar(title: const Text('Alerts')),
+      body: items == null
+          ? const Center(child: CircularProgressIndicator())
+          : items.isEmpty
+              ? Center(
+                  child: Column(mainAxisSize: MainAxisSize.min, children: [
+                    const Text('🔔', style: TextStyle(fontSize: 48)),
+                    const SizedBox(height: 8),
+                    Text('No alerts yet', style: TextStyle(color: Colors.grey.shade600)),
+                  ]),
+                )
+              : RefreshIndicator(
+                  onRefresh: _load,
+                  child: ListView.builder(
+                    padding: const EdgeInsets.all(12),
+                    itemCount: items.length,
+                    itemBuilder: (_, i) {
+                      final n = items[i] as Map;
+                      final at = DateTime.parse(n['createdAt'] as String).toLocal();
+                      final type = n['type'] as String;
+                      final warn = type.contains('HELD') || type.contains('NO_SHOW');
+                      return Container(
+                        margin: const EdgeInsets.only(bottom: 10),
+                        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16)),
+                        child: ListTile(
+                          leading: CircleAvatar(
+                            backgroundColor: (warn ? red : blue).withValues(alpha: 0.1),
+                            child: Icon(_icon(type), color: warn ? red : blue),
+                          ),
+                          title: Text(n['title'] as String, style: const TextStyle(fontWeight: FontWeight.w700)),
+                          subtitle: Text('${n['body']}\n${at.hour.toString().padLeft(2, '0')}:${at.minute.toString().padLeft(2, '0')} · ${at.day}/${at.month}'),
+                          isThreeLine: true,
+                        ),
+                      ).enter(i < 8 ? i : 8);
+                    },
+                  ),
+                ),
     );
   }
 }
 
-/// Live map of the bus with ETA to the child's stop. Refreshes every 5 seconds.
+/// Live map of the bus: satellite view, road route, smooth bus movement and ETA.
 class TrackScreen extends StatefulWidget {
   const TrackScreen({super.key, required this.tripId});
   final String tripId;
@@ -395,12 +512,25 @@ class TrackScreen extends StatefulWidget {
   State<TrackScreen> createState() => _TrackScreenState();
 }
 
-class _TrackScreenState extends State<TrackScreen> {
+class _TrackScreenState extends State<TrackScreen> with SingleTickerProviderStateMixin {
   Map<String, dynamic>? _live;
   String? _error;
   Timer? _timer;
   final _map = MapController();
   bool _centred = false;
+  bool _satellite = true;
+  late final AnimationController _move = AnimationController(vsync: this, duration: const Duration(milliseconds: 4500));
+  LatLng? _from;
+  LatLng? _to;
+
+  LatLng? get _busNow {
+    final to = _to;
+    final from = _from;
+    if (to == null) return null;
+    if (from == null) return to;
+    final t = Curves.easeInOut.transform(_move.value);
+    return LatLng(from.latitude + (to.latitude - from.latitude) * t, from.longitude + (to.longitude - from.longitude) * t);
+  }
 
   @override
   void initState() {
@@ -412,6 +542,7 @@ class _TrackScreenState extends State<TrackScreen> {
   @override
   void dispose() {
     _timer?.cancel();
+    _move.dispose();
     super.dispose();
   }
 
@@ -419,15 +550,23 @@ class _TrackScreenState extends State<TrackScreen> {
     try {
       final live = await Api.instance.get('/parent/trips/${widget.tripId}/live') as Map<String, dynamic>;
       if (!mounted) return;
+      final bus = live['bus'] as Map?;
+      if (bus != null) {
+        final next = LatLng((bus['lat'] as num).toDouble(), (bus['lng'] as num).toDouble());
+        if (_to == null || next != _to) {
+          _from = _busNow ?? next;
+          _to = next;
+          _move.forward(from: 0);
+        }
+        if (!_centred) {
+          _centred = true;
+          _map.move(next, 15);
+        }
+      }
       setState(() {
         _live = live;
         _error = null;
       });
-      final bus = live['bus'] as Map?;
-      if (bus != null && !_centred) {
-        _centred = true;
-        _map.move(LatLng((bus['lat'] as num).toDouble(), (bus['lng'] as num).toDouble()), 14);
-      }
     } on ApiException catch (e) {
       if (!mounted) return;
       setState(() => _error = e.status == 403 ? 'This trip has ended.' : e.message);
@@ -439,106 +578,203 @@ class _TrackScreenState extends State<TrackScreen> {
   Widget build(BuildContext context) {
     final live = _live;
     final route = (live?['route'] as List? ?? []).cast<Map>();
-    final bus = live?['bus'] as Map?;
     final school = live?['school'] as Map?;
     final kids = (live?['children'] as List? ?? []).cast<Map>();
     LatLng p(Map m) => LatLng((m['lat'] as num).toDouble(), (m['lng'] as num).toDouble());
-    final start = bus != null ? p(bus) : (route.isNotEmpty ? p(route.first) : const LatLng(20.59, 78.96));
+    final stops = route.map(p).toList();
+    final road = pathFrom(live?['path'], stops);
+    final start = _to ?? (stops.isNotEmpty ? stops.first : const LatLng(30.90, 75.85));
+    final myStops = kids.map((k) => (k['stop'] as Map?)?['routeStopId']).toSet();
 
     return Scaffold(
-      appBar: AppBar(title: Text(live?['direction'] == 'AFTERNOON' ? 'Bus coming home' : 'Bus to school')),
-      body: Column(children: [
-        if (_error != null) Container(width: double.infinity, color: Colors.red.shade50, padding: const EdgeInsets.all(12), child: Text(_error!)),
-        Expanded(
-          child: FlutterMap(
-            mapController: _map,
-            options: MapOptions(initialCenter: start, initialZoom: 13),
-            children: [
-              TileLayer(urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png', userAgentPackageName: 'in.schoolbus.app'),
-              if (route.length > 1)
-                PolylineLayer(polylines: [Polyline(points: route.map(p).toList(), strokeWidth: 4, color: Colors.blue.withValues(alpha: 0.6))]),
-              MarkerLayer(markers: [
-                for (final s in route)
-                  Marker(
-                    point: p(s),
-                    width: 22,
-                    height: 22,
-                    child: Container(decoration: BoxDecoration(color: s['reached'] == true ? Colors.green : ink, shape: BoxShape.circle, border: Border.all(color: Colors.white, width: 2))),
+      body: Stack(children: [
+        FlutterMap(
+          mapController: _map,
+          options: MapOptions(initialCenter: start, initialZoom: 14),
+          children: [
+            ...mapTiles(satellite: _satellite),
+            ...roadLine(road),
+            MarkerLayer(markers: [
+              for (final s in route)
+                Marker(
+                  point: p(s),
+                  width: myStops.contains(s['routeStopId']) ? 44 : 22,
+                  height: myStops.contains(s['routeStopId']) ? 44 : 22,
+                  child: myStops.contains(s['routeStopId'])
+                      ? const Icon(Icons.location_on, color: Colors.deepOrange, size: 44)
+                      : Container(
+                          decoration: BoxDecoration(
+                            color: s['reached'] == true ? green : ink,
+                            shape: BoxShape.circle,
+                            border: Border.all(color: Colors.white, width: 3),
+                          ),
+                        ),
+                ),
+              if (school != null && school['lat'] != null)
+                Marker(
+                  point: p(school),
+                  width: 40,
+                  height: 40,
+                  child: Container(
+                    decoration: BoxDecoration(color: blue, shape: BoxShape.circle, border: Border.all(color: Colors.white, width: 3)),
+                    child: const Center(child: Text('🏫', style: TextStyle(fontSize: 18))),
                   ),
-                for (final k in kids)
-                  if (k['stop'] != null)
-                    Marker(point: p(k['stop'] as Map), width: 36, height: 36, child: const Icon(Icons.home, color: Colors.deepOrange, size: 32)),
-                if (school != null && school['lat'] != null)
-                  Marker(point: p(school), width: 32, height: 32, child: const Text('🏫', style: TextStyle(fontSize: 26))),
-                if (bus != null)
-                  Marker(
-                    point: p(bus),
-                    width: 40,
-                    height: 40,
-                    child: Container(
-                      decoration: BoxDecoration(color: brand, shape: BoxShape.circle, border: Border.all(color: ink, width: 2)),
-                      child: const Center(child: Text('🚌', style: TextStyle(fontSize: 20))),
+                ),
+            ]),
+            AnimatedBuilder(
+              animation: _move,
+              builder: (_, __) {
+                final now = _busNow;
+                return MarkerLayer(markers: [
+                  if (now != null) Marker(point: now, width: 56, height: 56, child: const BusMarker()),
+                ]);
+              },
+            ),
+            MapAttribution(satellite: _satellite),
+          ],
+        ),
+        SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Row(children: [
+              Material(
+                color: Colors.white,
+                shape: const CircleBorder(),
+                elevation: 4,
+                child: IconButton(icon: const Icon(Icons.arrow_back), onPressed: () => Navigator.pop(context)),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(24),
+                    boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 8)],
+                  ),
+                  child: Row(children: [
+                    Expanded(
+                      child: Text(live?['direction'] == 'AFTERNOON' ? 'Bus coming home' : 'Bus to school', style: const TextStyle(fontWeight: FontWeight.w800)),
                     ),
-                  ),
-              ]),
-            ],
+                    if (live != null && live['signalLost'] != true) const LiveBadge(),
+                  ]),
+                ),
+              ),
+              const SizedBox(width: 10),
+              MapStyleButton(satellite: _satellite, onTap: () => setState(() => _satellite = !_satellite)),
+            ]),
           ),
         ),
-        if (live != null) _InfoPanel(live: live, kids: kids, onCentre: bus == null ? null : () => _map.move(p(bus), 15)),
+        Align(
+          alignment: Alignment.bottomCenter,
+          child: live == null
+              ? (_error != null ? _ErrorCard(text: _error!) : const SizedBox())
+              : _InfoSheet(live: live, kids: kids, route: route, error: _error, onFindBus: _to == null ? null : () => _map.move(_to!, 16)),
+        ),
       ]),
     );
   }
 }
 
-class _InfoPanel extends StatelessWidget {
-  const _InfoPanel({required this.live, required this.kids, this.onCentre});
+class _ErrorCard extends StatelessWidget {
+  const _ErrorCard({required this.text});
+  final String text;
+
+  @override
+  Widget build(BuildContext context) => Container(
+        margin: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20)),
+        child: Text(text),
+      );
+}
+
+class _InfoSheet extends StatelessWidget {
+  const _InfoSheet({required this.live, required this.kids, required this.route, this.error, this.onFindBus});
   final Map<String, dynamic> live;
   final List<Map> kids;
-  final VoidCallback? onCentre;
+  final List<Map> route;
+  final String? error;
+  final VoidCallback? onFindBus;
 
   @override
   Widget build(BuildContext context) {
     final bus = live['bus'] as Map?;
     final lost = live['signalLost'] == true;
-    final toSchool = live['toSchool'] as Map?;
-    return Material(
-      elevation: 8,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 14, 16, 18),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+    final kid = kids.isNotEmpty ? kids.first : null;
+    final eta = kid?['etaSeconds'] as num?;
+    final dist = kid?['distanceM'] as num?;
+    final reachedStop = kid?['busReachedStop'] == true;
+    final mins = eta == null ? null : (eta / 60).ceil();
+    final reachedCount = route.where((r) => r['reached'] == true).length;
+    final stopName = (kid?['stop'] as Map?)?['name'] ?? 'your stop';
+
+    Widget headline;
+    if (reachedStop) {
+      headline = const Text('Bus is at your stop 🎉', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800, color: green));
+    } else if (mins == null) {
+      headline = const Text('Bus has passed your stop', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800));
+    } else {
+      headline = Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
+          TweenAnimationBuilder<double>(
+            tween: Tween(begin: 0, end: mins.toDouble()),
+            duration: const Duration(milliseconds: 800),
+            builder: (_, v, __) => Text('${v.round()}', style: const TextStyle(fontSize: 44, fontWeight: FontWeight.w900, height: 1)),
+          ),
+          const Padding(padding: EdgeInsets.only(bottom: 6, left: 4), child: Text('min away', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700))),
+        ]),
+        Text('${((dist ?? 0) / 1000).toStringAsFixed(1)} km to $stopName', style: TextStyle(color: Colors.grey.shade600)),
+      ]);
+    }
+
+    return Container(
+      width: double.infinity,
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+        boxShadow: [BoxShadow(color: Colors.black26, blurRadius: 16)],
+      ),
+      padding: const EdgeInsets.fromLTRB(20, 10, 20, 16),
+      child: SafeArea(
+        top: false,
+        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Center(child: Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(4)))),
+          const SizedBox(height: 14),
+          if (error != null) Padding(padding: const EdgeInsets.only(bottom: 10), child: Text(error!, style: const TextStyle(color: red))),
           if (lost)
             Container(
               padding: const EdgeInsets.all(10),
-              margin: const EdgeInsets.only(bottom: 10),
-              decoration: BoxDecoration(color: const Color(0xFFFFF4D6), borderRadius: BorderRadius.circular(8)),
-              child: Text(bus == null ? 'Waiting for the bus location…' : 'GPS signal lost. Showing the last known position (${bus['ageSeconds']}s ago).'),
+              margin: const EdgeInsets.only(bottom: 12),
+              decoration: BoxDecoration(color: const Color(0xFFFFF4D6), borderRadius: BorderRadius.circular(12)),
+              child: Row(children: [
+                const Icon(Icons.gps_off, color: amber),
+                const SizedBox(width: 8),
+                Expanded(child: Text(bus == null ? 'Waiting for the bus location…' : 'GPS signal lost. Showing the last known position.')),
+              ]),
             ),
-          for (final k in kids) ...[
-            Row(children: [
-              Expanded(child: Text(_eta(k), style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold))),
-              StatusChip(k['status'] as String),
-            ]),
-            if (k['stop'] != null) Text('Stop: ${(k['stop'] as Map)['name']}'),
-            const SizedBox(height: 6),
-          ],
-          if (toSchool != null) Text('To school: ${(((toSchool['distanceM'] as num) / 1000)).toStringAsFixed(1)} km, about ${((toSchool['etaSeconds'] as num) / 60).ceil()} min'),
-          if (bus != null)
-            Row(children: [
-              Text('Speed ${(bus['speedKmh'] as num? ?? 0).round()} km/h · updated ${bus['ageSeconds']}s ago', style: const TextStyle(fontSize: 12, color: Colors.grey)),
-              const Spacer(),
-              if (onCentre != null) TextButton.icon(onPressed: onCentre, icon: const Icon(Icons.my_location, size: 18), label: const Text('Find bus')),
-            ]),
+          Row(children: [
+            Expanded(child: headline),
+            if (kid != null) StatusChip(kid['status'] as String),
+          ]),
+          const SizedBox(height: 14),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: TweenAnimationBuilder<double>(
+              tween: Tween(begin: 0, end: route.isEmpty ? 0 : reachedCount / route.length),
+              duration: const Duration(milliseconds: 900),
+              builder: (_, v, __) => LinearProgressIndicator(value: v, minHeight: 8, backgroundColor: const Color(0xFFEDEFF3), color: green),
+            ),
+          ),
+          const SizedBox(height: 4),
+          Row(children: [
+            Text('$reachedCount of ${route.length} stops done', style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
+            const Spacer(),
+            if (bus != null) Text('${(bus['speedKmh'] as num? ?? 0).round()} km/h', style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
+            if (onFindBus != null) TextButton.icon(onPressed: onFindBus, icon: const Icon(Icons.my_location, size: 18), label: const Text('Find bus')),
+          ]),
         ]),
       ),
-    );
-  }
-
-  String _eta(Map k) {
-    if (k['busReachedStop'] == true) return live['direction'] == 'MORNING' ? 'Bus has reached your stop' : 'Bus is at your stop';
-    final eta = k['etaSeconds'] as num?;
-    final dist = k['distanceM'] as num?;
-    if (eta == null || dist == null) return 'Bus has passed your stop';
-    final mins = (eta / 60).ceil();
-    return 'Bus is ${(dist / 1000).toStringAsFixed(1)} km away · about $mins min';
+    ).animate().slideY(begin: 0.3, end: 0, duration: 400.ms, curve: Curves.easeOutCubic);
   }
 }

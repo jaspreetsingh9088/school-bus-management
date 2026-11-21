@@ -2,7 +2,12 @@ import 'dart:async';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_animate/flutter_animate.dart';
+import 'package:flutter_map/flutter_map.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:latlong2/latlong.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import 'api.dart';
 import 'main.dart';
@@ -39,34 +44,84 @@ class _CrewHomeState extends State<CrewHome> {
   @override
   Widget build(BuildContext context) {
     final s = Api.instance.session!;
+    final trips = _trips;
     return Scaffold(
-      appBar: AppBar(
-        title: Text('Hello, ${s.name.split(' ').first}'),
-        actions: [IconButton(icon: const Icon(Icons.logout), onPressed: () => logoutAndRestart(context))],
+      body: RefreshIndicator(
+        onRefresh: _load,
+        child: ListView(padding: EdgeInsets.zero, children: [
+          GradientHeader(
+            title: '${greeting()}, ${s.name.split(' ').first}',
+            subtitle: '${s.role == 'DRIVER' ? 'Driver' : 'Attendant'} · ${s.companyName}',
+            trailing: IconButton(icon: const Icon(Icons.logout, color: Colors.white), tooltip: 'Log out', onPressed: () => logoutAndRestart(context)),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 18, 16, 24),
+            child: trips == null
+                ? const Padding(padding: EdgeInsets.all(40), child: Center(child: CircularProgressIndicator()))
+                : Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    const Text('Today’s trips', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+                    const SizedBox(height: 10),
+                    if (trips.isEmpty)
+                      Container(
+                        padding: const EdgeInsets.all(28),
+                        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(24)),
+                        child: Column(children: [
+                          const Text('☕', style: TextStyle(fontSize: 48)),
+                          const SizedBox(height: 8),
+                          Text('No trips for you today. Pull down to refresh.', textAlign: TextAlign.center, style: TextStyle(color: Colors.grey.shade600)),
+                        ]),
+                      ).enter(0),
+                    for (var i = 0; i < trips.length; i++) _tripCard(trips[i] as Map).enter(i),
+                  ]),
+          ),
+        ]),
       ),
-      body: _trips == null
-          ? const Center(child: CircularProgressIndicator())
-          : RefreshIndicator(
-              onRefresh: _load,
-              child: ListView(padding: const EdgeInsets.all(12), children: [
-                Text('${s.role == 'DRIVER' ? 'Driver' : 'Attendant'} · ${s.companyName}', style: const TextStyle(color: Colors.grey)),
-                const SizedBox(height: 8),
-                if (_trips!.isEmpty) const Padding(padding: EdgeInsets.all(24), child: Text('No trips for you today. Pull down to refresh.')),
-                for (final row in _trips!)
-                  Card(
-                    child: ListTile(
-                      leading: Icon(row['trip']['direction'] == 'MORNING' ? Icons.wb_sunny : Icons.home, color: brand, size: 32),
-                      title: Text(row['routeName'] as String, style: const TextStyle(fontWeight: FontWeight.bold)),
-                      subtitle: Text('Bus ${row['busNumber']} · ${row['trip']['direction'] == 'MORNING' ? 'Morning pickup' : 'Afternoon drop-off'}'),
-                      trailing: StatusChip(row['trip']['status'] as String),
-                      onTap: () async {
-                        await Navigator.push(context, MaterialPageRoute(builder: (_) => TripScreen(tripId: row['trip']['id'] as String)));
-                        _load();
-                      },
-                    ),
-                  ),
+    );
+  }
+
+  Widget _tripCard(Map row) {
+    final trip = row['trip'] as Map;
+    final morning = trip['direction'] == 'MORNING';
+    final status = trip['status'] as String;
+    return Container(
+      margin: const EdgeInsets.only(bottom: 14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(24),
+        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 14, offset: const Offset(0, 6))],
+      ),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(24),
+        onTap: () async {
+          await Navigator.push(context, MaterialPageRoute(builder: (_) => TripScreen(tripId: trip['id'] as String)));
+          _load();
+        },
+        child: Padding(
+          padding: const EdgeInsets.all(18),
+          child: Row(children: [
+            Container(
+              width: 56,
+              height: 56,
+              decoration: BoxDecoration(
+                gradient: LinearGradient(colors: morning ? [const Color(0xFFFFC400), const Color(0xFFFF8A00)] : [const Color(0xFF5B8DEF), const Color(0xFF1F3A8A)]),
+                borderRadius: BorderRadius.circular(18),
+              ),
+              child: Center(child: Text(morning ? '🌅' : '🌇', style: const TextStyle(fontSize: 28))),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(morning ? 'Morning pickup' : 'Afternoon drop-off', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 17)),
+                const SizedBox(height: 2),
+                Text('${row['routeName']} · ${row['busNumber']}', style: TextStyle(color: Colors.grey.shade600, fontSize: 13)),
               ]),
             ),
+            status == 'IN_PROGRESS' ? const LiveBadge(label: 'RUNNING') : StatusChip(status),
+            const SizedBox(width: 4),
+            const Icon(Icons.chevron_right, color: Colors.grey),
+          ]),
+        ),
+      ),
     );
   }
 }
@@ -229,6 +284,7 @@ class _TripScreenState extends State<TripScreen> {
       if (parentId != null) 'receivedByParentId': parentId,
     };
     setState(() => _busy = true);
+    HapticFeedback.mediumImpact();
     try {
       final res = await Api.instance.post('$_base/student-events', {'events': [ev]}) as List;
       final r = res.first as Map;
@@ -398,12 +454,21 @@ class _TripScreenState extends State<TripScreen> {
     return Scaffold(
       appBar: AppBar(
         title: Text(_morning ? 'Morning pickup' : 'Afternoon drop-off'),
-        actions: [IconButton(icon: const Icon(Icons.sos, color: Colors.red), tooltip: 'Report a problem', onPressed: _incident)],
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.map_outlined),
+            tooltip: 'Route map',
+            onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => TripMapScreen(sheet: sheet, myPosition: _last))),
+          ),
+          IconButton(icon: const Icon(Icons.sos, color: Colors.redAccent), tooltip: 'Report a problem', onPressed: _incident),
+        ],
       ),
       body: RefreshIndicator(
         onRefresh: _load,
         child: ListView(padding: const EdgeInsets.fromLTRB(12, 12, 12, 24), children: [
           _Banner(
+            done: kids.where((k) => !['SCHEDULED', 'BOARDED', 'HELD'].contains(k['status'])).length,
+            total: kids.length,
             title: status == 'SCHEDULED'
                 ? 'Trip not started'
                 : status == 'COMPLETED'
@@ -420,7 +485,7 @@ class _TripScreenState extends State<TripScreen> {
             warn: _gpsProblem != null,
           ),
           const SizedBox(height: 10),
-          for (final stop in stops) _stopCard(stop),
+          for (var i = 0; i < stops.length; i++) _stopCard(stops[i]).enter(i < 6 ? i : 6),
         ]),
       ),
       bottomNavigationBar: _nextStep(trip),
@@ -463,7 +528,11 @@ class _TripScreenState extends State<TripScreen> {
                       Text(statusLabel[k['status']] ?? '${k['status']}', style: TextStyle(fontSize: 12, color: statusColor(k['status'] as String))),
                   ]),
                 ),
-                _studentActions(k),
+                AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 300),
+                  transitionBuilder: (c, a) => ScaleTransition(scale: a, child: c),
+                  child: KeyedSubtree(key: ValueKey('${k['studentId']}-${k['status']}'), child: _studentActions(k)),
+                ),
               ]),
             ),
         ]),
@@ -473,26 +542,121 @@ class _TripScreenState extends State<TripScreen> {
 }
 
 class _Banner extends StatelessWidget {
-  const _Banner({required this.title, this.subtitle, this.warn = false});
+  const _Banner({required this.title, this.subtitle, this.warn = false, this.done = 0, this.total = 0});
   final String title;
   final String? subtitle;
   final bool warn;
+  final int done;
+  final int total;
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(color: warn ? const Color(0xFFFDECEC) : const Color(0xFFE8F0FD), borderRadius: BorderRadius.circular(12)),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        gradient: warn ? const LinearGradient(colors: [Color(0xFFC62828), Color(0xFF8E1B1B)]) : headerGradient,
+        borderRadius: BorderRadius.circular(22),
+      ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text(title, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+        Text(title, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: Colors.white)),
         if (subtitle != null) ...[
-          const SizedBox(height: 2),
+          const SizedBox(height: 4),
           Row(children: [
-            Icon(warn ? Icons.gps_off : Icons.circle, size: 10, color: warn ? Colors.red : Colors.green),
+            Icon(warn ? Icons.gps_off : Icons.circle, size: 10, color: warn ? Colors.white : Colors.greenAccent)
+                .animate(onPlay: (c) => c.repeat(reverse: true))
+                .fade(begin: 0.4, end: 1, duration: 800.ms),
             const SizedBox(width: 6),
-            Expanded(child: Text(subtitle!, style: const TextStyle(fontSize: 13))),
+            Expanded(child: Text(subtitle!, style: TextStyle(fontSize: 13, color: Colors.white.withValues(alpha: 0.85)))),
           ]),
         ],
+        if (total > 0) ...[
+          const SizedBox(height: 12),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: TweenAnimationBuilder<double>(
+              tween: Tween(begin: 0, end: done / total),
+              duration: const Duration(milliseconds: 700),
+              builder: (_, v, __) => LinearProgressIndicator(value: v, minHeight: 8, color: brand, backgroundColor: Colors.white24),
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text('$done of $total children done', style: TextStyle(fontSize: 12, color: Colors.white.withValues(alpha: 0.8))),
+        ],
+      ]),
+    );
+  }
+}
+
+/// Route map for the crew: road, stops, the bus's own position, and a button to navigate.
+class TripMapScreen extends StatefulWidget {
+  const TripMapScreen({super.key, required this.sheet, this.myPosition});
+  final Map<String, dynamic> sheet;
+  final Position? myPosition;
+
+  @override
+  State<TripMapScreen> createState() => _TripMapScreenState();
+}
+
+class _TripMapScreenState extends State<TripMapScreen> {
+  bool _satellite = true;
+
+  @override
+  Widget build(BuildContext context) {
+    final stops = (widget.sheet['stops'] as List).cast<Map>();
+    final school = widget.sheet['school'] as Map?;
+    LatLng p(Map m) => LatLng((m['lat'] as num).toDouble(), (m['lng'] as num).toDouble());
+    final stopPts = stops.map(p).toList();
+    final road = pathFrom(widget.sheet['path'], stopPts);
+    final me = widget.myPosition == null ? null : LatLng(widget.myPosition!.latitude, widget.myPosition!.longitude);
+    final next = stops.cast<Map?>().firstWhere((s) => s!['arrivedAt'] == null, orElse: () => null);
+    final all = [...stopPts, if (me != null) me, if (school != null && school['lat'] != null) p(school)];
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('Route map')),
+      body: Stack(children: [
+        FlutterMap(
+          options: MapOptions(
+            initialCameraFit: all.length > 1 ? CameraFit.coordinates(coordinates: all, padding: const EdgeInsets.all(48)) : null,
+            initialCenter: all.isNotEmpty ? all.first : const LatLng(30.90, 75.85),
+            initialZoom: 14,
+          ),
+          children: [
+            ...mapTiles(satellite: _satellite),
+            ...roadLine(road),
+            MarkerLayer(markers: [
+              for (final s in stops)
+                Marker(
+                  point: p(s),
+                  width: 30,
+                  height: 30,
+                  child: Container(
+                    decoration: BoxDecoration(color: s['arrivedAt'] != null ? green : ink, shape: BoxShape.circle, border: Border.all(color: Colors.white, width: 2)),
+                    child: Center(child: Text('${s['sequence']}', style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w800))),
+                  ),
+                ),
+              if (school != null && school['lat'] != null)
+                Marker(point: p(school), width: 36, height: 36, child: const Text('🏫', style: TextStyle(fontSize: 28))),
+              if (me != null) Marker(point: me, width: 56, height: 56, child: const BusMarker()),
+            ]),
+            MapAttribution(satellite: _satellite),
+          ],
+        ),
+        Positioned(right: 14, top: 14, child: MapStyleButton(satellite: _satellite, onTap: () => setState(() => _satellite = !_satellite))),
+        if (next != null)
+          Positioned(
+            left: 16,
+            right: 16,
+            bottom: 24,
+            child: FilledButton.icon(
+              style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(56), backgroundColor: blue),
+              icon: const Icon(Icons.navigation),
+              label: Text('Navigate to ${next['name']}', overflow: TextOverflow.ellipsis),
+              onPressed: () => launchUrl(
+                Uri.parse('https://www.google.com/maps/dir/?api=1&destination=${next['lat']},${next['lng']}&travelmode=driving'),
+                mode: LaunchMode.externalApplication,
+              ),
+            ).animate().slideY(begin: 1, end: 0, duration: 400.ms, curve: Curves.easeOutBack),
+          ),
       ]),
     );
   }

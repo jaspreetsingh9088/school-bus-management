@@ -2,6 +2,7 @@
  * School Bus Management System — database schema (v1).
  * Every tenant-owned table carries companyId. Money is stored in paise (integer).
  */
+import { sql } from 'drizzle-orm';
 import {
   pgTable, pgEnum, uuid, text, integer, boolean, timestamp, date, doublePrecision,
   jsonb, bigserial, uniqueIndex, index, primaryKey,
@@ -155,6 +156,8 @@ export const students = pgTable('students', {
   specialInstructions: text('special_instructions'),
   status: studentStatusEnum('status').notNull().default('PENDING_APPROVAL'),
   mayGoHomeAlone: boolean('may_go_home_alone').notNull().default(false),
+  /** Monthly transport fee in paise; null = no fee */
+  monthlyFeePaise: integer('monthly_fee_paise'),
   serviceStart: date('service_start', { mode: 'string' }),
   serviceEnd: date('service_end', { mode: 'string' }),
   /** Code the company gives a parent to link this student to their account */
@@ -256,6 +259,10 @@ export const routes = pgTable('routes', {
   driverId: uuid('driver_id').references(() => users.id),
   attendantId: uuid('attendant_id').references(() => users.id),
   active: boolean('active').notNull().default(true),
+  /** Days the route runs, ISO weekday numbers: 1 = Monday … 7 = Sunday. Default Monday–Saturday. */
+  days: integer('days').array().notNull().default(sql`'{1,2,3,4,5,6}'::integer[]`),
+  /** Road-following path [[lat, lng], …] for the map, worked out from the stops */
+  path: jsonb('path'),
   /** Set when archived instead of deleted (the record has trip history) */
   deletedAt: ts('deleted_at'),
   createdAt: createdAt(),
@@ -453,7 +460,10 @@ export const invoices = pgTable('invoices', {
   paid: integer('paid').notNull().default(0),
   status: invoiceStatusEnum('status').notNull().default('ISSUED'),
   createdAt: createdAt(),
-}, (t) => [uniqueIndex('invoices_company_number_uq').on(t.companyId, t.number)]);
+}, (t) => [
+  uniqueIndex('invoices_company_number_uq').on(t.companyId, t.number),
+  uniqueIndex('invoices_student_period_uq').on(t.studentId, t.periodStart),
+]);
 
 export const invoiceLines = pgTable('invoice_lines', {
   id: id(),

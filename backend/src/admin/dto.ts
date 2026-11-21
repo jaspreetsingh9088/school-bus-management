@@ -1,7 +1,7 @@
 import { Type } from 'class-transformer';
 import {
   ArrayMaxSize, IsArray, IsBoolean, IsEmail, IsIn, IsInt, IsLatitude, IsLongitude, IsNotEmpty, IsOptional,
-  IsString, IsUUID, Matches, MaxLength, Min, ValidateNested,
+  IsString, IsUUID, Matches, Max, MaxLength, Min, ValidateNested,
 } from 'class-validator';
 import { HHMM, ISO_DATE } from '../common/time';
 
@@ -73,6 +73,8 @@ export class RouteDto {
   @IsOptional() @IsUUID() driverId?: string;
   @IsOptional() @IsUUID() attendantId?: string;
   @IsOptional() @IsBoolean() active?: boolean;
+  /** Days the route runs: 1 = Monday … 7 = Sunday */
+  @IsOptional() @IsArray() @ArrayMaxSize(7) @IsInt({ each: true }) @Min(1, { each: true }) @Max(7, { each: true }) days?: number[];
 }
 
 export class RouteStopItem {
@@ -104,6 +106,8 @@ export class StudentDto {
   @IsOptional() @IsString() homeAddress?: string;
   @IsOptional() @IsString() emergencyContactPhone?: string;
   @IsOptional() @IsString() specialInstructions?: string;
+  /** Monthly transport fee in paise (₹1 = 100) */
+  @IsOptional() @IsInt() @Min(0) monthlyFeePaise?: number;
   @IsOptional() @Matches(ISO_DATE, DATE_MSG) serviceStart?: string;
   @IsOptional() @Matches(ISO_DATE, DATE_MSG) serviceEnd?: string;
   @IsOptional() @IsIn(['PENDING_APPROVAL', 'ACTIVE', 'SUSPENDED', 'INACTIVE']) status?: 'PENDING_APPROVAL' | 'ACTIVE' | 'SUSPENDED' | 'INACTIVE';

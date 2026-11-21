@@ -113,7 +113,7 @@ describe('setup by the platform owner and company admin', () => {
     // A driver can't be put in the attendant seat
     await a.post('/admin/routes', { schoolId: S.school, name: 'Bad', direction: 'MORNING', attendantId: S.driver.id }).expect(400);
 
-    const common = { schoolId: S.school, busId: S.bus, driverId: S.driver.id, attendantId: S.attendant.id };
+    const common = { schoolId: S.school, busId: S.bus, driverId: S.driver.id, attendantId: S.attendant.id, days: [1, 2, 3, 4, 5, 6, 7] };
     S.am = (await a.post('/admin/routes', { ...common, name: 'R7 AM', direction: 'MORNING' }).expect(201)).body.id;
     S.pm = (await a.post('/admin/routes', { ...common, name: 'R7 PM', direction: 'AFTERNOON' }).expect(201)).body.id;
 
@@ -439,6 +439,29 @@ describe('company data stays separate', () => {
   });
 });
 
+describe('automatic schedule', () => {
+  it('runs routes only on their days and skips holidays', async () => {
+    const a = as(S.adminA);
+    // Find the next Sunday within a week and check a Monday–Saturday route has no trip that day
+    const sundayOffset = [...Array(8).keys()].find((i) => new Date(Date.now() + i * 86_400_000 + 5.5 * 3_600_000).getUTCDay() === 0)!;
+    const sunday = zoned(new Date(Date.now() + sundayOffset * 86_400_000), 'Asia/Kolkata').date;
+    const r = (await a.post('/admin/routes', { schoolId: S.school, name: 'Weekday only', direction: 'MORNING', busId: S.bus, driverId: S.driver.id }).expect(201)).body;
+    expect(r.days).toEqual([1, 2, 3, 4, 5, 6]);
+    const gen = (await a.post('/admin/trips/generate', { date: sunday }).expect(200)).body;
+    expect(gen.skippedDay).toBe(1);
+
+    // A holiday removes that day's unstarted trips and stops new ones
+    const day = zoned(new Date(Date.now() + 3 * 86_400_000), 'Asia/Kolkata').date;
+    await a.post('/admin/trips/generate', { date: day }).expect(200);
+    const h = (await a.post('/admin/holidays', { date: day, name: 'Diwali' }).expect(201)).body;
+    expect(h.removedTrips).toBeGreaterThan(0);
+    expect((await a.get(`/admin/trips?date=${day}`).expect(200)).body).toHaveLength(0);
+    await a.del(`/admin/holidays/${h.id}`).expect(200);
+    expect((await a.get(`/admin/trips?date=${day}`).expect(200)).body.length).toBeGreaterThan(0); // comes back by itself
+    await a.del(`/admin/routes/${r.id}`).expect(200);
+  });
+});
+
 describe('stopping and deleting trips', () => {
   it('stops a running trip, then deletes it', async () => {
     const a = as(S.adminA);
@@ -449,8 +472,53 @@ describe('stopping and deleting trips', () => {
     await a.del(`/admin/trips/${id}`).expect(409); // running
     expect((await a.post(`/admin/trips/${id}/cancel`).expect(200)).body.status).toBe('CANCELLED');
     expect((await a.del(`/admin/trips/${id}`).expect(200)).body).toEqual({ deleted: true });
-    await a.get(`/admin/trips/${id}`).expect(404);
+    const after = (await a.get(`/admin/trips?date=${tomorrow}`).expect(200)).body.map((t: any) => t.trip.id);
+    expect(after).not.toContain(id); // hidden, and the automatic schedule doesn't bring it back
     await as(S.adminB).del(`/admin/trips/${trips[1].trip.id}`).expect(404); // other company
+  });
+});
+
+describe('fees', () => {
+  it('bills students monthly, records payments and exports CSV', async () => {
+    const a = as(S.adminA);
+    const month = zoned(new Date(), 'Asia/Kolkata').date.slice(0, 7);
+    expect((await a.post('/admin/fees/set', { amount: 1500, className: '4' }).expect(200)).body.updated).toBe(3);
+
+    let v = (await a.get(`/admin/fees?month=${month}`).expect(200)).body;
+    expect(v.totals).toMatchObject({ students: 3, fee: 4500, collected: 0, pending: 4500 });
+    expect(v.byClass[0]).toMatchObject({ name: 'Class 4', students: 3 });
+    expect(v.chart).toHaveLength(6);
+    const bill = v.rows.find((r: any) => r.studentId === S.kids[0].id);
+
+    await a.post(`/admin/fees/${bill.invoiceId}/paid`, { amount: 500, method: 'UPI', reference: 'UPI123' }).expect(200);
+    v = (await a.get(`/admin/fees?month=${month}`).expect(200)).body;
+    expect(v.rows.find((r: any) => r.invoiceId === bill.invoiceId)).toMatchObject({ status: 'PARTLY_PAID', paidRupees: 500, dueRupees: 1000 });
+    await a.post(`/admin/fees/${bill.invoiceId}/paid`, { amount: 5000 }).expect(400); // more than due
+    await a.post(`/admin/fees/${bill.invoiceId}/paid`, {}).expect(200); // rest
+    v = (await a.get(`/admin/fees?month=${month}`).expect(200)).body;
+    expect(v.totals.collected).toBe(1500);
+    expect(v.rows.find((r: any) => r.invoiceId === bill.invoiceId).status).toBe('PAID');
+
+    // The parent sees it in the app
+    const kids = (await as(S.tokenP).get('/parent/children').expect(200)).body;
+    expect(kids.find((k: any) => k.studentId === S.kids[0].id).fee).toMatchObject({ status: 'PAID', feeRupees: 1500 });
+
+    // Undo
+    await a.post(`/admin/fees/${bill.invoiceId}/pending`).expect(200);
+    v = (await a.get(`/admin/fees?month=${month}`).expect(200)).body;
+    expect(v.totals.collected).toBe(0);
+
+    const studentCsv = (await a.get(`/admin/exports/fees.csv?month=${month}&by=student`).expect(200)).text;
+    expect(studentCsv.split('\n')[0]).toContain('Student,Class');
+    expect(studentCsv).toContain('Aarav');
+    const classCsv = (await a.get(`/admin/exports/fees.csv?month=${month}&by=class`).expect(200)).text;
+    expect(classCsv).toContain('Class 4');
+    expect(classCsv).toContain('TOTAL');
+    const busCsv = (await a.get(`/admin/exports/fees.csv?month=${month}&by=bus`).expect(200)).text;
+    expect(busCsv).toContain('KA01AB1234');
+    const all = (await a.get('/admin/exports/students.csv').expect(200)).text;
+    expect(all.split('\n').length).toBeGreaterThan(3);
+    await as(S.adminB).post(`/admin/fees/${bill.invoiceId}/paid`, {}).expect(404); // other company
   });
 });
 

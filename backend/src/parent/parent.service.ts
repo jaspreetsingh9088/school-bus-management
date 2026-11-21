@@ -8,6 +8,7 @@ import {
   absences, authorizedAdults, buses, consents, Direction, notifications, parents, parentStudents, routes, routeStops,
   schools, stops, studentAssignments, students, trips, tripStudents, users,
 } from '../db/schema';
+import { FeesService } from '../fees/fees.service';
 import { TripsService } from '../trips/trips.service';
 
 export const CONSENT_VERSION = '2026-11';
@@ -18,6 +19,7 @@ export class ParentService {
     @InjectDb() private readonly db: Db,
     private readonly settings: CompanySettingsService,
     private readonly tripsService: TripsService,
+    private readonly fees: FeesService,
   ) {}
 
   async parentOf(user: AuthUser) {
@@ -84,11 +86,13 @@ export class ParentService {
       .leftJoin(buses, eq(buses.id, routes.busId))
       .leftJoin(users, eq(users.id, routes.driverId))
       .where(inArray(studentAssignments.studentId, ids));
+    const bills = await this.fees.currentForStudents(parent.companyId, ids);
     return kids.map(({ student, schoolName }) => ({
       studentId: student.id, name: student.name, photoUrl: student.photoUrl, school: schoolName,
       className: student.className, section: student.section, status: student.status, mayGoHomeAlone: student.mayGoHomeAlone,
       morning: plan.find((p) => p.studentId === student.id && p.direction === 'MORNING') ?? null,
       afternoon: plan.find((p) => p.studentId === student.id && p.direction === 'AFTERNOON') ?? null,
+      fee: bills.find((b) => b.studentId === student.id) ?? null,
     }));
   }
 

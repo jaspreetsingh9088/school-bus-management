@@ -56,7 +56,8 @@ export class AdminController {
   ) {}
 
   @Get('dashboard')
-  dashboard(@CurrentUser() u: AuthUser) {
+  async dashboard(@CurrentUser() u: AuthUser) {
+    await this.tripsService.ensureToday(tenantOf(u));
     return this.admin.dashboard(tenantOf(u));
   }
 
@@ -80,15 +81,24 @@ export class AdminController {
     const companyId = tenantOf(u);
     if (dto.schoolId) await this.admin.schools.get(companyId, dto.schoolId);
     const [row] = await this.db.insert(holidays).values({ ...dto, companyId }).returning();
-    return row;
+    const removedTrips = await this.tripsService.applyHoliday(companyId, dto.date, dto.schoolId ?? null);
+    return { ...row, removedTrips };
   }
 
-  @Delete('holidays/:id') deleteHoliday(@CurrentUser() u: AuthUser, @Param('id', uuid) id: string) { return this.admin.removeHoliday(tenantOf(u), id); }
+  @Delete('holidays/:id') async deleteHoliday(@CurrentUser() u: AuthUser, @Param('id', uuid) id: string) {
+    const res = await this.admin.removeHoliday(tenantOf(u), id);
+    this.tripsService.invalidate(tenantOf(u));
+    return res;
+  }
 
   // Stops
   @Get('stops') listStops(@CurrentUser() u: AuthUser) { return this.admin.stops.list(tenantOf(u)); }
   @Post('stops') createStop(@CurrentUser() u: AuthUser, @Body() dto: StopDto) { return this.admin.stops.create(tenantOf(u), { ...dto }); }
-  @Patch('stops/:id') updateStop(@CurrentUser() u: AuthUser, @Param('id', uuid) id: string, @Body() dto: UpdateStopDto) { return this.admin.stops.update(tenantOf(u), id, { ...dto }); }
+  @Patch('stops/:id') async updateStop(@CurrentUser() u: AuthUser, @Param('id', uuid) id: string, @Body() dto: UpdateStopDto) {
+    const row = await this.admin.stops.update(tenantOf(u), id, { ...dto });
+    if (dto.lat !== undefined || dto.lng !== undefined) await this.admin.refreshPathsForStop(id);
+    return row;
+  }
   @Delete('stops/:id') deleteStop(@CurrentUser() u: AuthUser, @Param('id', uuid) id: string) { return this.admin.removeStop(tenantOf(u), id); }
 
   // Buses
@@ -110,15 +120,15 @@ export class AdminController {
 
   // Routes
   @Get('routes') listRoutes(@CurrentUser() u: AuthUser) { return this.admin.routes.list(tenantOf(u)); }
-  @Post('routes') createRoute(@CurrentUser() u: AuthUser, @Body() dto: RouteDto) { return this.admin.createRoute(tenantOf(u), dto); }
+  @Post('routes') createRoute(@CurrentUser() u: AuthUser, @Body() dto: RouteDto) { this.tripsService.invalidate(tenantOf(u)); return this.admin.createRoute(tenantOf(u), dto); }
   @Get('routes/:id') getRoute(@CurrentUser() u: AuthUser, @Param('id', uuid) id: string) { return this.admin.routeDetail(tenantOf(u), id); }
-  @Patch('routes/:id') updateRoute(@CurrentUser() u: AuthUser, @Param('id', uuid) id: string, @Body() dto: UpdateRouteDto) { return this.admin.updateRoute(tenantOf(u), id, dto); }
-  @Put('routes/:id/stops') setStops(@CurrentUser() u: AuthUser, @Param('id', uuid) id: string, @Body() dto: RouteStopsDto) { return this.admin.setRouteStops(tenantOf(u), id, dto); }
+  @Patch('routes/:id') updateRoute(@CurrentUser() u: AuthUser, @Param('id', uuid) id: string, @Body() dto: UpdateRouteDto) { this.tripsService.invalidate(tenantOf(u)); return this.admin.updateRoute(tenantOf(u), id, dto); }
+  @Put('routes/:id/stops') setStops(@CurrentUser() u: AuthUser, @Param('id', uuid) id: string, @Body() dto: RouteStopsDto) { this.tripsService.invalidate(tenantOf(u)); return this.admin.setRouteStops(tenantOf(u), id, dto); }
   @Delete('routes/:id') deleteRoute(@CurrentUser() u: AuthUser, @Param('id', uuid) id: string) { return this.admin.removeRoute(tenantOf(u), id); }
   @Delete('routes/:id/assignments/:studentId') unassign(@CurrentUser() u: AuthUser, @Param('id', uuid) id: string, @Param('studentId', uuid) sid: string) {
     return this.admin.removeAssignment(tenantOf(u), id, sid);
   }
-  @Put('routes/:id/assignments') assign(@CurrentUser() u: AuthUser, @Param('id', uuid) id: string, @Body() dto: AssignmentsDto) { return this.admin.assignStudents(tenantOf(u), id, dto); }
+  @Put('routes/:id/assignments') assign(@CurrentUser() u: AuthUser, @Param('id', uuid) id: string, @Body() dto: AssignmentsDto) { this.tripsService.invalidate(tenantOf(u)); return this.admin.assignStudents(tenantOf(u), id, dto); }
 
   // Students
   @Get('students') listStudents(@CurrentUser() u: AuthUser) { return this.admin.students.list(tenantOf(u)); }
@@ -159,7 +169,11 @@ export class AdminController {
   // Trips
   @Post('trips/generate') @HttpCode(200)
   generate(@CurrentUser() u: AuthUser, @Body() dto: GenerateTripsDto) { return this.tripsService.generateForDate(tenantOf(u), dto.date); }
-  @Get('trips') listTrips(@CurrentUser() u: AuthUser, @Query('date') date?: string) { return this.admin.tripsForDate(tenantOf(u), dateParam(date)); }
+  @Get('trips') async listTrips(@CurrentUser() u: AuthUser, @Query('date') date?: string) {
+    const d = dateParam(date);
+    await this.tripsService.ensureTrips(tenantOf(u), d);
+    return this.admin.tripsForDate(tenantOf(u), d);
+  }
   @Get('trips/:id') async trip(@CurrentUser() u: AuthUser, @Param('id', uuid) id: string) {
     return this.tripsService.sheet(await this.access.getForCompany(id, tenantOf(u)));
   }

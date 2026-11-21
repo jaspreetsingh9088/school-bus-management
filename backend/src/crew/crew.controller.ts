@@ -4,7 +4,7 @@ import {
   ArrayMaxSize, ArrayMinSize, IsArray, IsIn, IsISO8601, IsLatitude, IsLongitude, IsNumber, IsOptional, IsString,
   IsUUID, MaxLength, ValidateNested,
 } from 'class-validator';
-import { and, asc, eq, or } from 'drizzle-orm';
+import { and, asc, eq, ne, or } from 'drizzle-orm';
 import { AuthUser, CREW_ROLES, CurrentUser, Roles, tenantOf } from '../common/auth';
 import { CompanySettingsService } from '../common/company-settings.service';
 import { zoned } from '../common/time';
@@ -75,10 +75,11 @@ export class CrewController {
   async today(@CurrentUser() u: AuthUser) {
     const cfg = await this.settings.get(tenantOf(u));
     const date = zoned(new Date(), cfg.timezone).date;
+    await this.tripsService.ensureTrips(tenantOf(u), date);
     return this.db
       .select({ trip: trips, routeName: routes.name, busNumber: buses.registrationNumber })
       .from(trips).innerJoin(routes, eq(routes.id, trips.routeId)).innerJoin(buses, eq(buses.id, trips.busId))
-      .where(and(eq(trips.companyId, tenantOf(u)), eq(trips.date, date), or(eq(trips.driverId, u.sub), eq(trips.attendantId, u.sub))))
+      .where(and(eq(trips.companyId, tenantOf(u)), eq(trips.date, date), ne(trips.status, 'CANCELLED'), or(eq(trips.driverId, u.sub), eq(trips.attendantId, u.sub))))
       .orderBy(asc(trips.direction));
   }
 

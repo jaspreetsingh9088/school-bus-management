@@ -1,15 +1,16 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
-import { and, asc, count, eq, gte, inArray, isNotNull, isNull, lte, or, sql } from 'drizzle-orm';
+import { and, asc, count, eq, gte, inArray, isNotNull, isNull, lte, ne, or, sql } from 'drizzle-orm';
 import { AuthGuard } from '../common/auth';
 import { CompanySettingsService } from '../common/company-settings.service';
 import { activationCode, hashPassword, normalizePhone } from '../common/passwords';
 import { zoned } from '../common/time';
 import { Db, InjectDb } from '../db/db.module';
 import {
-  authorizedAdults, buses, companies, holidays, incidents, parents, parentStudents, routes, routeStops, schools,
+  authorizedAdults, buses, companies, holidays, incidents, invoices, parents, parentStudents, routes, routeStops, schools,
   staffProfiles, stops, studentAssignments, students, trips, tripStudents, users,
 } from '../db/schema';
 import { NotificationsService } from '../notifications/notifications.service';
+import { RoutePathService } from '../trips/route-path.service';
 import { AnnouncementDto, AssignmentsDto, CompanyDto, ParentDto, RouteDto, RouteStopsDto, StaffDto, StudentDto } from './dto';
 import { TenantCrud, uniqueToConflict } from './tenant-crud';
 
@@ -27,6 +28,7 @@ export class AdminService {
     private readonly settings: CompanySettingsService,
     private readonly notifications: NotificationsService,
     private readonly guard: AuthGuard,
+    private readonly paths: RoutePathService,
   ) {
     this.schools = new TenantCrud(db, schools, 'School');
     this.stops = new TenantCrud(db, stops, 'Stop');
@@ -124,7 +126,9 @@ export class AdminService {
 
   async updateRoute(companyId: string, id: string, dto: Partial<RouteDto>) {
     await this.checkRouteRefs(companyId, dto);
-    return this.routes.update(companyId, id, { ...dto });
+    const row = await this.routes.update(companyId, id, { ...dto });
+    if (dto.schoolId) await this.paths.refresh(id);
+    return row;
   }
 
   private async checkRouteRefs(companyId: string, dto: Partial<RouteDto>) {
@@ -146,8 +150,10 @@ export class AdminService {
       .from(studentAssignments).innerJoin(students, eq(students.id, studentAssignments.studentId))
       .where(eq(studentAssignments.routeId, id));
     const bus = route.busId ? await this.buses.get(companyId, route.busId) : null;
+    const path = route.path ?? (stopList.length >= 2 ? await this.paths.refresh(id) : null);
+    const [school] = await this.db.select({ name: schools.name, lat: schools.lat, lng: schools.lng }).from(schools).where(eq(schools.id, route.schoolId));
     return {
-      ...route, stops: stopList, students: riders,
+      ...route, path, school, stops: stopList, students: riders,
       capacityWarning: bus && riders.length > bus.capacity ? `${riders.length} students but ${bus.capacity} seats` : null,
     };
   }
@@ -187,6 +193,9 @@ export class AdminService {
         }
       }
       return tx.select().from(routeStops).where(eq(routeStops.routeId, routeId)).orderBy(asc(routeStops.sequence));
+    }).then(async (rows) => {
+      await this.paths.refresh(routeId);
+      return rows;
     });
   }
 
@@ -210,6 +219,11 @@ export class AdminService {
         .onConflictDoUpdate({ target: [studentAssignments.studentId, studentAssignments.direction], set: { routeId, routeStopId: a.routeStopId } });
     }
     return this.routeDetail(companyId, routeId);
+  }
+
+  async refreshPathsForStop(stopId: string) {
+    const using = await this.db.selectDistinct({ routeId: routeStops.routeId }).from(routeStops).where(eq(routeStops.stopId, stopId));
+    for (const r of using) await this.paths.refresh(r.routeId);
   }
 
   // ───────────── Students ─────────────
@@ -403,7 +417,8 @@ export class AdminService {
     await this.students.get(companyId, studentId);
     await this.db.delete(studentAssignments).where(eq(studentAssignments.studentId, studentId));
     const [{ n }] = await this.db.select({ n: count() }).from(tripStudents).where(eq(tripStudents.studentId, studentId));
-    if (n > 0) {
+    const [{ bills }] = await this.db.select({ bills: count() }).from(invoices).where(eq(invoices.studentId, studentId));
+    if (n > 0 || bills > 0) {
       await this.db.delete(parentStudents).where(eq(parentStudents.studentId, studentId));
       await this.db.update(students).set({ status: 'INACTIVE', deletedAt: new Date(), activationCode: null }).where(eq(students.id, studentId));
       return { archived: true };
@@ -497,7 +512,7 @@ export class AdminService {
       countOf(this.db.select({ n: count() }).from(routes).where(and(eq(routes.companyId, companyId), eq(routes.active, true), isNull(routes.deletedAt)))),
     ]);
 
-    const todayTrips = await this.db.select().from(trips).where(and(eq(trips.companyId, companyId), eq(trips.date, today)));
+    const todayTrips = await this.db.select().from(trips).where(and(eq(trips.companyId, companyId), eq(trips.date, today), ne(trips.status, 'CANCELLED')));
     const statusCounts = todayTrips.length
       ? await this.db.select({ status: tripStudents.status, n: count() }).from(tripStudents)
         .where(inArray(tripStudents.tripId, todayTrips.map((t) => t.id))).groupBy(tripStudents.status)
@@ -568,7 +583,7 @@ export class AdminService {
   async tripsForDate(companyId: string, date: string) {
     return this.db.select({ trip: trips, routeName: routes.name, busNumber: buses.registrationNumber })
       .from(trips).innerJoin(routes, eq(routes.id, trips.routeId)).innerJoin(buses, eq(buses.id, trips.busId))
-      .where(and(eq(trips.companyId, companyId), eq(trips.date, date))).orderBy(asc(routes.name));
+      .where(and(eq(trips.companyId, companyId), eq(trips.date, date), ne(trips.status, 'CANCELLED'))).orderBy(asc(routes.name), asc(trips.direction));
   }
 
   async studentHistory(companyId: string, studentId: string, from: string, to: string) {

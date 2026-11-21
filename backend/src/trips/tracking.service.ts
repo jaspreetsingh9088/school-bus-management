@@ -157,7 +157,7 @@ export class TrackingService {
     const cfg = await this.settings.get(trip.companyId);
     const all = await this.routeStopsFor(trip);
     const ahead = this.remaining(all);
-    const [route] = await this.db.select({ school: schools }).from(routes)
+    const [route] = await this.db.select({ school: schools, path: routes.path }).from(routes)
       .innerJoin(schools, eq(schools.id, routes.schoolId)).where(eq(routes.id, trip.routeId));
     const mine = await this.db.select().from(tripStudents)
       .where(and(eq(tripStudents.tripId, trip.id), inArray(tripStudents.studentId, studentIds)));
@@ -181,6 +181,8 @@ export class TrackingService {
       /** Show "signal lost" instead of a frozen bus (spec 6) */
       signalLost: ageSeconds === null || ageSeconds > cfg.signalLostSeconds,
       route: all.map((s) => ({ routeStopId: s.routeStopId, name: s.name, lat: s.lat, lng: s.lng, reached: !!s.arrivedAt })),
+      /** Road-following line [[lat, lng], …] for the map; null = draw straight lines between stops */
+      path: route.path ?? null,
       school: { name: route.school.name, ...school },
       toSchool,
       children: mine.map((m) => {

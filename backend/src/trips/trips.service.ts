@@ -51,13 +51,46 @@ export class TripsService {
 
   // ───────────── Planning ─────────────
 
+  private readonly ensured = new Map<string, number>();
+
+  /**
+   * Makes sure trips exist for a date without anyone pressing a button.
+   * Runs at most every 3 minutes per company and date, and only for today and the next 7 days.
+   */
+  async ensureTrips(companyId: string, date: string) {
+    const cfg = await this.settings.get(companyId);
+    const today = zoned(new Date(), cfg.timezone).date;
+    const limit = zoned(new Date(Date.now() + 7 * 86_400_000), cfg.timezone).date;
+    if (date < today || date > limit) return;
+    const key = `${companyId}:${date}`;
+    if ((this.ensured.get(key) ?? 0) > Date.now()) return;
+    this.ensured.set(key, Date.now() + 3 * 60_000);
+    await this.generateForDate(companyId, date);
+  }
+
+  async ensureToday(companyId: string) {
+    const cfg = await this.settings.get(companyId);
+    await this.ensureTrips(companyId, zoned(new Date(), cfg.timezone).date);
+  }
+
+  /** Forget the cache so the next view regenerates at once (after route, stop or holiday changes). */
+  invalidate(companyId: string) {
+    for (const key of this.ensured.keys()) if (key.startsWith(`${companyId}:`)) this.ensured.delete(key);
+  }
+
   /** Creates the day's trips and passenger lists from active routes. Safe to run more than once. */
   async generateForDate(companyId: string, date: string) {
-    const activeRoutes = await this.db.select().from(routes).where(and(eq(routes.companyId, companyId), eq(routes.active, true)));
+    const activeRoutes = await this.db.select().from(routes)
+      .where(and(eq(routes.companyId, companyId), eq(routes.active, true), isNull(routes.deletedAt)));
     const dayHolidays = await this.db.select().from(holidays).where(and(eq(holidays.companyId, companyId), eq(holidays.date, date)));
-    const result = { created: 0, skippedHoliday: 0, skippedIncomplete: 0, trips: [] as string[] };
+    const weekday = isoWeekday(date);
+    const result = { created: 0, skippedHoliday: 0, skippedIncomplete: 0, skippedDay: 0, trips: [] as string[] };
 
     for (const route of activeRoutes) {
+      if (!(route.days ?? [1, 2, 3, 4, 5, 6]).includes(weekday)) {
+        result.skippedDay++;
+        continue;
+      }
       if (!route.busId || !route.driverId) {
         result.skippedIncomplete++;
         continue;
@@ -401,15 +434,34 @@ export class TripsService {
     return updated;
   }
 
-  /** Admin deletes a trip that isn't running, with its boarding and GPS records. */
+  /**
+   * Admin removes a trip that isn't running. Today's and future trips are kept as CANCELLED and hidden,
+   * so the automatic schedule doesn't bring them back. Past trips are deleted with their records.
+   */
   async remove(tripId: string, admin: AuthUser) {
     const trip = await this.access.getForCompany(tripId, admin.companyId);
     if (trip.status === 'IN_PROGRESS') throw new ConflictException('This trip is running. Stop it first, then delete it.');
+    const cfg = await this.settings.get(trip.companyId);
+    if (trip.date >= zoned(new Date(), cfg.timezone).date) {
+      await this.db.update(trips).set({ status: 'CANCELLED', endedAt: trip.endedAt ?? new Date() }).where(eq(trips.id, trip.id));
+      return { deleted: true };
+    }
     await this.db.transaction(async (tx) => {
       await tx.update(incidents).set({ tripId: null }).where(eq(incidents.tripId, trip.id));
       await tx.delete(trips).where(eq(trips.id, trip.id));
     });
     return { deleted: true };
+  }
+
+  /** A holiday removes that day's trips that haven't started. */
+  async applyHoliday(companyId: string, date: string, schoolId: string | null) {
+    const dayTrips = await this.db.select({ trip: trips, schoolId: routes.schoolId }).from(trips)
+      .innerJoin(routes, eq(routes.id, trips.routeId))
+      .where(and(eq(trips.companyId, companyId), eq(trips.date, date), eq(trips.status, 'SCHEDULED')));
+    const ids = dayTrips.filter((t) => !schoolId || t.schoolId === schoolId).map((t) => t.trip.id);
+    if (ids.length) await this.db.delete(trips).where(inArray(trips.id, ids));
+    this.invalidate(companyId);
+    return ids.length;
   }
 
   /** A parent's new or cancelled absence updates a trip that already exists. */
@@ -461,8 +513,12 @@ export class TripsService {
         .where(inArray(parentStudents.studentId, ids))
       : [];
 
+    const [routeInfo] = await this.db.select({ path: routes.path, school: schools }).from(routes)
+      .innerJoin(schools, eq(schools.id, routes.schoolId)).where(eq(routes.id, trip.routeId));
     return {
       trip,
+      path: routeInfo?.path ?? null,
+      school: routeInfo ? { name: routeInfo.school.name, lat: routeInfo.school.lat, lng: routeInfo.school.lng } : null,
       stops: stopRows.map(({ routeStop, stop, event }) => ({
         routeStopId: routeStop.id, sequence: routeStop.sequence, scheduledTime: routeStop.scheduledTime,
         name: stop.name, lat: stop.lat, lng: stop.lng,
@@ -492,4 +548,10 @@ export class TripsService {
     await this.notifications.notify({ companyId, userIds: await this.notifications.adminUserIds(companyId), safety: true, ...a });
     this.realtime.toCompany(companyId, 'alert', a);
   }
+}
+
+/** 1 = Monday … 7 = Sunday, for a YYYY-MM-DD date. */
+export function isoWeekday(date: string): number {
+  const d = new Date(`${date}T00:00:00Z`).getUTCDay();
+  return d === 0 ? 7 : d;
 }

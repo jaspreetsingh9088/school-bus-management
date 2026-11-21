@@ -5,6 +5,7 @@ import { CompanySettingsService } from '../common/company-settings.service';
 import { zoned } from '../common/time';
 import { Db, InjectDb } from '../db/db.module';
 import { companies } from '../db/schema';
+import { FeesService } from '../fees/fees.service';
 import { TripsService } from './trips.service';
 
 /**
@@ -17,6 +18,7 @@ export class CronController {
     @InjectDb() private readonly db: Db,
     private readonly trips: TripsService,
     private readonly settings: CompanySettingsService,
+    private readonly fees: FeesService,
   ) {}
 
   @Public() @Get('daily')
@@ -29,6 +31,7 @@ export class CronController {
       const tz = (await this.settings.get(c.id)).timezone;
       const today = zoned(new Date(), tz).date;
       const tomorrow = zoned(new Date(Date.now() + 86_400_000), tz).date;
+      await this.fees.ensureInvoices(c.id, today.slice(0, 7), true);
       out[c.id] = {
         [today]: await this.trips.generateForDate(c.id, today),
         [tomorrow]: await this.trips.generateForDate(c.id, tomorrow),

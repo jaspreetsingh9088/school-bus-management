@@ -9,6 +9,8 @@ import { AuditInterceptor } from './common/audit.interceptor';
 import { AuthGuard, Public } from './common/auth';
 import { CompanySettingsService } from './common/company-settings.service';
 import { CrewController } from './crew/crew.controller';
+import { FeesController } from './fees/fees.controller';
+import { FeesService } from './fees/fees.service';
 import { DbModule } from './db/db.module';
 import { NotificationsService } from './notifications/notifications.service';
 import { ConsolePushProvider, ConsoleSmsProvider, PushProvider, SmsProvider } from './notifications/providers';
@@ -18,6 +20,7 @@ import { NoopRealtime } from './realtime/noop-realtime';
 import { RealtimeGateway } from './realtime/realtime.gateway';
 import { CronController } from './trips/cron.controller';
 import { IncidentsService } from './trips/incidents.service';
+import { RoutePathService } from './trips/route-path.service';
 import { TrackingService } from './trips/tracking.service';
 import { TripAccessService } from './trips/trip-access.service';
 import { TripsService } from './trips/trips.service';
@@ -41,7 +44,7 @@ const jwtSecret = () => {
     DbModule,
     JwtModule.registerAsync({ global: true, useFactory: () => ({ secret: jwtSecret() }) }),
   ],
-  controllers: [HealthController, CronController, AuthController, PlatformController, AdminController, ParentController, CrewController],
+  controllers: [HealthController, CronController, FeesController, AuthController, PlatformController, AdminController, ParentController, CrewController],
   providers: [
     AuthGuard,
     { provide: APP_GUARD, useExisting: AuthGuard },
@@ -55,9 +58,11 @@ const jwtSecret = () => {
     TripAccessService,
     TripsService,
     TrackingService,
+    RoutePathService,
     IncidentsService,
     AuthService,
     AdminService,
+    FeesService,
     ParentService,
   ],
 })
